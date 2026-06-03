@@ -1,14 +1,16 @@
 import React, { useState } from 'react'
+import { Eye, EyeOff, GraduationCap, Sparkles } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 
 export default function AuthPage() {
-  const { login, signup } = useAuth()
+  const { login, signup, resetPassword } = useAuth()
   const [mode, setMode] = useState('login')
-  const [name, setName] = useState('')
   const [branch, setBranch] = useState('ECE')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const isSignup = mode === 'signup'
@@ -16,16 +18,17 @@ export default function AuthPage() {
   async function handleSubmit(event) {
     event.preventDefault()
     setError('')
+    setSuccess('')
     setSubmitting(true)
 
     try {
       if (isSignup) {
         await signup({
-          name: name.trim() || 'Placeonix Student',
           branch,
           email: email.trim(),
           password,
         })
+        setSuccess('Account created successfully. Opening your dashboard...')
       } else {
         await login(email.trim(), password)
       }
@@ -36,10 +39,30 @@ export default function AuthPage() {
     }
   }
 
+  async function handleForgotPassword() {
+    setError('')
+    setSuccess('')
+
+    if (!email.trim()) {
+      setError('Enter your email first, then click forgot password.')
+      return
+    }
+
+    try {
+      await resetPassword(email.trim())
+      setSuccess('Password reset link sent. Please check your email.')
+    } catch (authError) {
+      setError(authError.message)
+    }
+  }
+
   return (
     <main className="auth-shell">
       <section className="auth-hero">
-        <div className="auth-logo">P</div>
+        <div className="auth-logo" aria-label="Placeonix">
+          <GraduationCap size={34} aria-hidden="true" />
+          <Sparkles className="auth-logo-spark" size={15} aria-hidden="true" />
+        </div>
         <p className="auth-kicker">Welcome to Placeonix</p>
         <h1>Your placement preparation starts here.</h1>
         <p>
@@ -56,6 +79,7 @@ export default function AuthPage() {
             onClick={() => {
               setMode('login')
               setError('')
+              setSuccess('')
             }}
           >
             Login
@@ -66,6 +90,7 @@ export default function AuthPage() {
             onClick={() => {
               setMode('signup')
               setError('')
+              setSuccess('')
             }}
           >
             Sign Up
@@ -81,33 +106,20 @@ export default function AuthPage() {
 
         <form className="auth-form" onSubmit={handleSubmit}>
           {isSignup && (
-            <>
-              <label>
-                Full Name
-                <input
-                  type="text"
-                  placeholder="Kanchi Prayuktha"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  required
-                />
-              </label>
-
-              <label>
-                Department
-                <select value={branch} onChange={(event) => setBranch(event.target.value)}>
-                  <option value="ECE">ECE</option>
-                  <option value="CSE">CSE</option>
-                  <option value="EEE">EEE</option>
-                  <option value="IT">IT</option>
-                  <option value="ME">ME</option>
-                  <option value="CIVIL">CIVIL</option>
-                  <option value="AERO">AERO</option>
-                  <option value="BME">BME</option>
-                  <option value="BT">BT</option>
-                </select>
-              </label>
-            </>
+            <label>
+              Department
+              <select value={branch} onChange={(event) => setBranch(event.target.value)}>
+                <option value="ECE">ECE</option>
+                <option value="CSE">CSE</option>
+                <option value="EEE">EEE</option>
+                <option value="IT">IT</option>
+                <option value="ME">ME</option>
+                <option value="CIVIL">CIVIL</option>
+                <option value="AERO">AERO</option>
+                <option value="BME">BME</option>
+                <option value="BT">BT</option>
+              </select>
+            </label>
           )}
 
           <label>
@@ -124,18 +136,36 @@ export default function AuthPage() {
 
           <label>
             Password
-            <input
-              type="password"
-              placeholder="Minimum 6 characters"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={isSignup ? 'new-password' : 'current-password'}
-              required
-              minLength={6}
-            />
+            <span className="password-field">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Minimum 6 characters"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={isSignup ? 'new-password' : 'current-password'}
+                required
+                minLength={6}
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword((value) => !value)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff size={19} aria-hidden="true" /> : <Eye size={19} aria-hidden="true" />}
+              </button>
+            </span>
           </label>
 
+          {!isSignup && (
+            <button className="forgot-password" type="button" onClick={handleForgotPassword}>
+              Forgot password?
+            </button>
+          )}
+
           {error && <div className="auth-error">{error}</div>}
+          {success && <div className="auth-success">{success}</div>}
 
           <button className="auth-submit" type="submit" disabled={submitting}>
             {submitting ? 'Please wait...' : isSignup ? 'Create Account' : 'Login'}

@@ -19,9 +19,9 @@ export default function Footer() {
           💼 LinkedIn/prayuktha-kanchi
         </a>
         <a href="https://github.com/prayukthakanchi-tech" target="_blank" rel="noreferrer" style={{ color: '#6c3ce1', fontSize: 12.5, fontWeight: 500 }}>
-          🐙 GitHucb/prayukthakanchi-tech
+          🐙 GitHub/prayukthakanchi-tech
         </a>
-        <span style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>© 2025 Kanchi Prayuktha</span>
+        <span style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>© 2026 Kanchi Prayuktha</span>
       </div>
     </footer>
   )

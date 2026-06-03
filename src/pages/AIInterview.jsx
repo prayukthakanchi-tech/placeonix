@@ -19,18 +19,40 @@ const QUIZ_COUNT = 7 // questions in prepare quiz before plan
 
 // ── Claude API ───────────────────────────────────────────────────
 async function callClaude(messages, systemPrompt) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1500,
-      system: systemPrompt,
-      messages,
-    }),
-  })
-  const data = await res.json()
-  return data.content?.map(b => b.text || '').join('') || ''
+  const prompt =
+    systemPrompt +
+    "\n\n" +
+    messages.map(m => `${m.role}: ${m.content}`).join("\n")
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      }),
+    }
+  )
+
+  const data = await response.json()
+
+  console.log("GEMINI RESPONSE:", data)
+
+  return (
+    data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+    'No response generated.'
+  )
 }
 
 // ── Shared UI ────────────────────────────────────────────────────
@@ -710,7 +732,10 @@ export default function AIInterview() {
     <div>
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 28, color: 'var(--text-primary)', marginBottom: 6 }}>🤖 AI Interview</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: 15 }}>Powered by Claude AI — prepare smarter, practice harder, get placed.</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: 15 }}>
+          Smart Interview Practice For Placements
+        </p>
+
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, maxWidth: 820, marginBottom: 36 }}>

@@ -10,68 +10,94 @@ import {
   LogOut,
   Settings,
   Target,
+  Shield,
   UserRound,
+  X,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 
+const ADMIN_EMAILS = ['admin@placeonix.com', 'prayukthakanchi@gmail.com']
+
 const navItems = [
-  { icon: Home, label: 'Dashboard', id: 'dashboard' },
-  { icon: BookOpen, label: 'Resources', id: 'resources' },
-  { icon: Brain, label: 'Aptitude', id: 'aptitude' },
-  { icon: Code2, label: 'Coding Practice', id: 'coding' },
-  { icon: Bot, label: 'AI Interview', id: 'interview' },
-  { icon: FileText, label: 'Resume & ATS', id: 'resume' },
-  { icon: BarChart3, label: 'Analytics', id: 'analytics' },
-  { icon: UserRound, label: 'Profile', id: 'profile' },
-  { icon: Settings, label: 'Settings', id: 'settings' },
+  { icon: Home,      label: 'Dashboard',      id: 'dashboard' },
+  { icon: BookOpen,  label: 'Placement Hub',   id: 'resources' },
+  { icon: Brain,     label: 'Aptitude',        id: 'aptitude' },
+  { icon: Code2,     label: 'Coding Practice', id: 'coding' },
+  { icon: Bot,       label: 'AI Interview',    id: 'interview' },
+  { icon: FileText,  label: 'Resume & ATS',    id: 'resume' },
+  { icon: BarChart3, label: 'Analytics',       id: 'analytics' },
+  { icon: UserRound, label: 'Profile',         id: 'profile' },
+  { icon: Settings,  label: 'Settings',        id: 'settings' },
 ]
 
-export default function Sidebar({ activePage, setActivePage }) {
-  const { logout } = useAuth()
+export default function Sidebar({ activePage, setActivePage, mobileOpen, onMobileClose }) {
+  const { user, profile, logout } = useAuth()
+  const readiness = profile?.placementReadiness ?? 78
+  const isAdmin = user && ADMIN_EMAILS.includes(user.email)
+
+  const visibleNavItems = [...navItems]
+  if (isAdmin) {
+    visibleNavItems.push({ icon: Shield, label: 'Admin Dashboard', id: 'admin' })
+  }
+
+  function handleNav(id) {
+    setActivePage(id)
+    if (onMobileClose) onMobileClose()
+  }
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
-        <div className="rocket">P</div>
-        <span className="sidebar-logo-text">Placeonix</span>
-      </div>
+    <>
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div className="sidebar-overlay" onClick={onMobileClose} />
+      )}
+      <aside className={`sidebar${mobileOpen ? ' sidebar-mobile-open' : ''}`}>
+        <div className="sidebar-logo">
+          <div className="rocket">P</div>
+          <span className="sidebar-logo-text">Placeonix</span>
+          {/* Mobile close button */}
+          <button className="sidebar-close-btn" onClick={onMobileClose} aria-label="Close menu">
+            <X size={18} />
+          </button>
+        </div>
 
-      <nav className="sidebar-nav">
-        {navItems.map((item) => (
-          <NavButton
-            key={item.id}
-            item={item}
-            active={activePage === item.id}
-            onClick={() => setActivePage(item.id)}
-          />
-        ))}
-      </nav>
+        <nav className="sidebar-nav">
+          {visibleNavItems.map((item) => (
+            <NavButton
+              key={item.id}
+              item={item}
+              active={activePage === item.id}
+              onClick={() => handleNav(item.id)}
+            />
+          ))}
+        </nav>
 
-      <div className="sidebar-progress-card">
-        <div className="sidebar-progress-header">
-          <div className="sidebar-progress-icon">
-            <Target size={16} aria-hidden="true" />
+        <div className="sidebar-progress-card">
+          <div className="sidebar-progress-header">
+            <div className="sidebar-progress-icon">
+              <Target size={16} aria-hidden="true" />
+            </div>
+            <div>
+              <div className="sidebar-progress-title">Keep Going!</div>
+            </div>
           </div>
-          <div>
-            <div className="sidebar-progress-title">Keep Going!</div>
+          <div className="sidebar-progress-sub">
+            Consistency today<br />Success tomorrow
           </div>
+          <div className="sidebar-progress-bar-wrap">
+            <div className="sidebar-progress-bar-fill" style={{ width: `${readiness}%` }} />
+          </div>
+          <div className="sidebar-progress-pct">{readiness}%</div>
         </div>
-        <div className="sidebar-progress-sub">
-          Consistency today<br />Success tomorrow
-        </div>
-        <div className="sidebar-progress-bar-wrap">
-          <div className="sidebar-progress-bar-fill" style={{ width: '72%' }} />
-        </div>
-        <div className="sidebar-progress-pct">72%</div>
-      </div>
 
-      <div className="sidebar-bottom">
-        <button className="sidebar-logout" type="button" onClick={logout}>
-          <LogOut className="nav-icon" size={17} aria-hidden="true" />
-          <span>Logout</span>
-        </button>
-      </div>
-    </aside>
+        <div className="sidebar-bottom">
+          <button className="sidebar-logout" type="button" onClick={logout}>
+            <LogOut className="nav-icon" size={17} aria-hidden="true" />
+            <span>Logout</span>
+          </button>
+        </div>
+      </aside>
+    </>
   )
 }
 

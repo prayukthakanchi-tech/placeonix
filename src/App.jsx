@@ -4,14 +4,20 @@ import Topbar from './components/Topbar.jsx'
 import Footer from './components/Footer.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import PlaceholderPage from './pages/PlaceholderPage.jsx'
-import Aptitude from './pages/Aptitude.jsx'
 import AIInterview from './pages/AIInterview.jsx'
+import Aptitude from './pages/Aptitude.jsx'
 import AuthPage from './pages/AuthPage.jsx'
+import Profile from './pages/Profile.jsx'
+import CodingPractice from './pages/CodingPractice.jsx'
+import ResumeATS from './pages/ResumeATS.jsx'
+import AdminDashboard from './pages/AdminDashboard.jsx'
+import Settings from './pages/Settings.jsx'
+import Resources from './pages/Resources.jsx'
 import { useAuth } from './context/AuthContext.jsx'
 
 const PAGE_META = {
   dashboard: { title: 'Dashboard',       icon: '🏠' },
-  resources:  { title: 'Resources',       icon: '📚', desc: 'Study materials, notes, and resources organized by department and subject.' },
+  resources:  { title: 'Placement Hub',   icon: '📚', desc: 'Department-specific placement prep, core engineering subject roadmaps, aptitude and technical coding.' },
   aptitude:   { title: 'Aptitude',        icon: '🧠' },
   coding:     { title: 'Coding Practice', icon: '💻', desc: 'Built-in online code editor with DSA problems and Judge0-powered execution.' },
   interview:  { title: 'AI Interview',    icon: '🤖' },
@@ -24,6 +30,7 @@ const PAGE_META = {
 export default function App() {
   const { user, loading } = useAuth()
   const [activePage, setActivePage] = useState('dashboard')
+  const [mobileOpen, setMobileOpen] = useState(false)
   const meta = PAGE_META[activePage] || PAGE_META.dashboard
 
   if (loading) {
@@ -41,16 +48,36 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar activePage={activePage} setActivePage={setActivePage} />
+      {mobileOpen && (
+        <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />
+      )}
+      <Sidebar 
+        activePage={activePage} 
+        setActivePage={setActivePage} 
+        mobileOpen={mobileOpen}
+        onMobileClose={() => setMobileOpen(false)}
+      />
       <div className="main-area">
-        <Topbar />
+        <Topbar onMenuToggle={() => setMobileOpen(!mobileOpen)} />
         <main className="page-content">
           {activePage === 'dashboard' ? (
             <Dashboard />
+          ) : activePage === 'resources' ? (
+            <Resources />
           ) : activePage === 'aptitude' ? (
             <Aptitude />
+          ) : activePage === 'coding' ? (
+            <CodingPractice />
+          ) : activePage === 'resume' ? (
+            <ResumeATS />
+          ) : activePage === 'admin' ? (
+            <AdminDashboard />
           ) : activePage === 'interview' ? (
             <AIInterview />
+          ) : activePage === 'profile' ? (
+            <Profile />
+          ) : activePage === 'settings' ? (
+            <Settings />
           ) : (
             <PlaceholderPage
               title={meta.title}

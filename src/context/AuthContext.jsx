@@ -2,11 +2,11 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
-  updateProfile,
 } from 'firebase/auth'
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
+import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
 import { auth, db } from '../firebase/config'
 
 const AuthContext = createContext(null)
@@ -30,15 +30,28 @@ function getAuthMessage(error) {
     return 'Password should be at least 6 characters.'
   }
 
+  if (code.includes('auth/operation-not-allowed')) {
+    return 'Email/password login is not enabled in Firebase. Enable it in Firebase Console > Authentication > Sign-in method.'
+  }
+
+  if (code.includes('auth/unauthorized-domain')) {
+    return 'This website domain is not authorized in Firebase. Add placeonix-theta.vercel.app in Firebase Console > Authentication > Settings > Authorized domains.'
+  }
+
+  if (code.includes('auth/network-request-failed')) {
+    return 'Network error. Please check your internet connection and try again.'
+  }
+
   if (code.includes('auth/invalid-email')) {
     return 'Please enter a valid email address.'
   }
 
-  return 'Something went wrong. Please try again.'
+  return `Firebase error: ${code || 'unknown error'}. Please try again.`
 }
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -50,6 +63,49 @@ export function AuthProvider({ children }) {
     return unsubscribe
   }, [])
 
+  useEffect(() => {
+    if (!user) {
+      setProfile(null)
+      return undefined
+    }
+
+    const profileRef = doc(db, 'users', user.uid)
+
+    const unsubscribe = onSnapshot(
+      profileRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setProfile(snapshot.data())
+          return
+        }
+
+        const defaultProfile = {
+          email: user.email,
+          branch: 'ECE',
+          role: 'student',
+          placementReadiness: 78,
+          skillsCompleted: 8,
+          skillsTarget: 15,
+          currentStreak: 0,
+          bestStreak: 0,
+          mockInterviewScore: 0,
+          xp: 0,
+          interviewsCompleted: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }
+
+        setDoc(profileRef, defaultProfile, { merge: true })
+        setProfile(defaultProfile)
+      },
+      () => {
+        setProfile(null)
+      }
+    )
+
+    return unsubscribe
+  }, [user])
+
   async function login(email, password) {
     try {
       await signInWithEmailAndPassword(auth, email, password)
@@ -58,21 +114,25 @@ export function AuthProvider({ children }) {
     }
   }
 
-  async function signup({ name, email, password, branch }) {
+  async function signup({ email, password, branch }) {
     try {
       const credential = await createUserWithEmailAndPassword(auth, email, password)
-      await updateProfile(credential.user, { displayName: name })
 
       try {
         await setDoc(doc(db, 'users', credential.user.uid), {
-          name,
           email,
           branch,
           role: 'student',
           placementReadiness: 78,
+          skillsCompleted: 0,
+          skillsTarget: 15,
           currentStreak: 0,
+          bestStreak: 0,
+          mockInterviewScore: 0,
           xp: 0,
+          interviewsCompleted: 0,
           createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         })
       } catch {
         // Profile storage is helpful but should not block account creation.
@@ -82,6 +142,30 @@ export function AuthProvider({ children }) {
     }
   }
 
+  async function resetPassword(email) {
+    try {
+      await sendPasswordResetEmail(auth, email)
+    } catch (error) {
+      throw new Error(getAuthMessage(error))
+    }
+  }
+
+  async function updateUserProfile(updates) {
+    if (!user) {
+      throw new Error('You must be logged in to update your profile.')
+    }
+
+    await setDoc(
+      doc(db, 'users', user.uid),
+      {
+        ...updates,
+        email: user.email,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    )
+  }
+
   async function logout() {
     await signOut(auth)
   }
@@ -89,12 +173,15 @@ export function AuthProvider({ children }) {
   const value = useMemo(
     () => ({
       user,
+      profile,
       loading,
       login,
       signup,
+      resetPassword,
+      updateUserProfile,
       logout,
     }),
-    [user, loading]
+    [user, profile, loading]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
