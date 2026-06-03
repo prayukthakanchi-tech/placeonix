@@ -56,10 +56,10 @@ const SEED_DATA = [
   { title: "PrepInsta Company Mock Papers", url: "https://prepinsta.com/company-prep/", category: "company", department: "COMMON", subject: "Recruiter Mock Papers", description: "Mock tests and past placement papers for TCS, Infosys, Cognizant, Wipro, and Accenture.", tags: ["#companyprep", "#mocktests", "#tcs"] },
 
   // ── COMPUTER SCIENCE ENGINEERING (CSE) ───────────────────────────
-  { title: "Striver's DSA A-to-Z Placement Sheet", url: "https://takeuforward.org/strivers-a2z-dsa-course-sheet-preview-2/", category: "coding", department: "CSE", subject: "Data Structures & Algorithms", description: "The most structured coding sheet for software engineering placements.", tags: ["#dsa", "#coding", "#striversheet"] },
-  { title: "NeetCode 150 - Coding Practice Map", url: "https://neetcode.io/practice", category: "coding", department: "CSE", subject: "Coding Practice", description: "150 curated LeetCode problems with full video walk-throughs and structural maps.", tags: ["#leetcode", "#coding", "#dsa"] },
-  { title: "Abdul Bari's Algorithms Lectures", url: "https://www.youtube.com/playlist?list=PLDN4rRL5gy4UzoN7Apx-w5G37WPo68e59", category: "coding", department: "CSE", subject: "Algorithms", description: "Gold standard video tutorials explaining algorithm design techniques (Greedy, DP, Divide & Conquer).", tags: ["#algorithms", "#dsa", "#youtube"] },
-  { title: "Jenny's Lectures - Data Structures Course", url: "https://www.youtube.com/playlist?list=PLdo5W4Nhv31bbKJzrsKfMpo_grxuLl8JH", category: "coding", department: "CSE", subject: "Data Structures", description: "Detailed whiteboard lectures explaining arrays, stacks, trees, and linked list implementations.", tags: ["#datastructures", "#cse", "#youtube"] },
+  { title: "Striver's DSA A-to-Z Placement Sheet", url: "https://takeuforward.org/strivers-a2z-dsa-course-sheet-preview-2/", category: "coding", department: "COMMON", subject: "Data Structures & Algorithms", description: "The most structured coding sheet for software engineering placements.", tags: ["#dsa", "#coding", "#striversheet"] },
+  { title: "NeetCode 150 - Coding Practice Map", url: "https://neetcode.io/practice", category: "coding", department: "COMMON", subject: "Coding Practice", description: "150 curated LeetCode problems with full video walk-throughs and structural maps.", tags: ["#leetcode", "#coding", "#dsa"] },
+  { title: "Abdul Bari's Algorithms Lectures", url: "https://www.youtube.com/playlist?list=PLDN4rRL5gy4UzoN7Apx-w5G37WPo68e59", category: "coding", department: "COMMON", subject: "Algorithms", description: "Gold standard video tutorials explaining algorithm design techniques (Greedy, DP, Divide & Conquer).", tags: ["#algorithms", "#dsa", "#youtube"] },
+  { title: "Jenny's Lectures - Data Structures Course", url: "https://www.youtube.com/playlist?list=PLdo5W4Nhv31bbKJzrsKfMpo_grxuLl8JH", category: "coding", department: "COMMON", subject: "Data Structures", description: "Detailed whiteboard lectures explaining arrays, stacks, trees, and linked list implementations.", tags: ["#datastructures", "#cse", "#youtube"] },
   { title: "Gate Smashers - Operating Systems Course", url: "https://www.youtube.com/playlist?list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p", category: "core", department: "CSE", subject: "Operating Systems", description: "Clear and popular lectures covering CPU Scheduling, Semaphores, Deadlocks, and Memory.", tags: ["#os", "#gate", "#youtube"] },
   { title: "Operating Systems: Three Easy Pieces (OSTEP)", url: "https://pages.cs.wisc.edu/~remzi/OSTEP/", category: "core", department: "CSE", subject: "OS Internals", description: "Highly acclaimed free textbook explaining virtualization, concurrency, and persistence internals.", tags: ["#os", "#concurrency", "#ostep", "#internals"] },
   { title: "PortSwigger Web Security Academy", url: "https://portswigger.net/web-security", category: "core", department: "CSE", subject: "Cybersecurity", description: "Free interactive labs covering security vulnerabilities, injection attacks, and encryption.", tags: ["#security", "#cybersecurity", "#portswigger"] },
@@ -221,12 +221,14 @@ export default function Resources() {
   }, [])
 
   // Dynamic increment tracker
-  async function handleResourceClick(id, url) {
-    try {
-      await updateDoc(doc(db, 'resources', id), {
-        clicks: increment(1)
-      })
-    } catch (e) {}
+  function handleResourceClick(id, url) {
+    if (id && !id.startsWith('local-')) {
+      try {
+        updateDoc(doc(db, 'resources', id), {
+          clicks: increment(1)
+        }).catch(() => {})
+      } catch (e) {}
+    }
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 
