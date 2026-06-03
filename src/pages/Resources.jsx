@@ -143,7 +143,9 @@ function getYoutubeThumbnail(url) {
 
 export default function Resources() {
   const { user, profile } = useAuth()
-  const [resources, setResources] = useState([])
+  const [resources, setResources] = useState(() => 
+    SEED_DATA.map((item, idx) => ({ id: `local-${idx}`, clicks: 0, ...item }))
+  )
   const [selectedDept, setSelectedDept] = useState('CSE')
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState('resources') // 'resources' | 'syllabus'
@@ -170,27 +172,29 @@ export default function Resources() {
           list.push(doc.data())
         })
 
-        const hasEmbeddedSystems = list.some(res => res.subject === 'Embedded Systems')
-        if (list.length === 0 || !hasEmbeddedSystems) {
-          console.log("Firestore resources empty or outdated. Upgrading database...")
-          // Clean existing unmatching resources to prevent duplicates
-          for (const docSnap of querySnapshot.docs) {
-            await deleteDoc(doc(db, 'resources', docSnap.id))
+        if (list.length > 0) {
+          const hasEmbeddedSystems = list.some(res => res.subject === 'Embedded Systems')
+          if (!hasEmbeddedSystems) {
+            console.log("Firestore resources outdated. Upgrading database...")
+            // Clean existing unmatching resources to prevent duplicates
+            for (const docSnap of querySnapshot.docs) {
+              await deleteDoc(doc(db, 'resources', docSnap.id))
+            }
+            
+            for (const item of SEED_DATA) {
+              await addDoc(collection(db, 'resources'), {
+                ...item,
+                submittedBy: 'System Curator',
+                status: 'approved',
+                clicks: 0,
+                createdAt: serverTimestamp()
+              })
+            }
+            console.log("Database update & seeding completed.")
           }
-          
-          for (const item of SEED_DATA) {
-            await addDoc(collection(db, 'resources'), {
-              ...item,
-              submittedBy: 'System Curator',
-              status: 'approved',
-              clicks: 0,
-              createdAt: serverTimestamp()
-            })
-          }
-          console.log("Database update & seeding completed.")
         }
       } catch (e) {
-        console.error("Database migration failed:", e)
+        console.error("Database migration check failed or quota exceeded:", e)
       }
     }
 
@@ -202,11 +206,11 @@ export default function Resources() {
         snapshot.forEach((doc) => {
           list.push({ id: doc.id, ...doc.data() })
         })
-        if (active) {
+        if (active && list.length > 0) {
           setResources(list)
         }
       }, (err) => {
-        console.error("Snapshot read error:", err)
+        console.error("Snapshot read error or quota exceeded:", err)
       })
     })
 
