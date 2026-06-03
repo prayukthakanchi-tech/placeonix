@@ -1280,29 +1280,59 @@ int main() {
 
 
 
-// ── Judge0 runner ─────────────────────────────────────────────────
+// ── Piston API runner (free, no key required) ─────────────────────
+const PISTON_LANGS = {
+  71: { language: 'python',     version: '3.10.0',  ext: 'py'   },
+  62: { language: 'java',       version: '15.0.2',  ext: 'java' },
+  54: { language: 'c++',        version: '10.2.0',  ext: 'cpp'  },
+  63: { language: 'javascript', version: '18.15.0', ext: 'js'   },
+  50: { language: 'c',          version: '10.2.0',  ext: 'c'    },
+}
+
 async function runCode(sourceCode, languageId) {
+  const langConfig = PISTON_LANGS[languageId]
+  if (!langConfig) return { success: false, output: 'Language not supported', type: 'Error' }
+
   try {
-    const res = await fetch('https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true', {
+    const res = await fetch('https://emkc.org/api/v2/piston/execute', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-RapidAPI-Key': 'SIGN_UP_FOR_KEY',
-        'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com',
-      },
-      body: JSON.stringify({ source_code: sourceCode, language_id: languageId, cpu_time_limit: 5, memory_limit: 128000 }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        language: langConfig.language,
+        version:  langConfig.version,
+        files: [{ name: `main.${langConfig.ext}`, content: sourceCode }],
+      }),
     })
-    if (!res.ok) throw new Error('API error')
+
+    if (!res.ok) throw new Error(`Server returned ${res.status}`)
     const data = await res.json()
-    if (data.stdout) return { success: true, output: data.stdout.trim(), time: data.time, memory: data.memory }
-    if (data.stderr) return { success: false, output: data.stderr, type: 'Runtime Error' }
-    if (data.compile_output) return { success: false, output: data.compile_output, type: 'Compile Error' }
-    return { success: false, output: data.status?.description || 'Unknown', type: 'Status' }
-  } catch {
+
+    // Compile error (for Java / C / C++)
+    const compileData = data.compile || {}
+    if (compileData.code !== undefined && compileData.code !== 0) {
+      const compileOut = (compileData.stderr || compileData.output || 'Compile error').trim()
+      return { success: false, output: compileOut, type: 'Compile Error' }
+    }
+
+    const run = data.run || {}
+    const stdout = (run.stdout || '').trim()
+    const stderr = (run.stderr || '').trim()
+
+    if (run.code !== 0 && stderr) {
+      return { success: false, output: stderr, type: 'Runtime Error' }
+    }
+
+    return {
+      success: true,
+      output: stdout || '(no output)',
+      time: run.cpu_time != null ? run.cpu_time.toFixed(3) : undefined,
+      memory: run.memory != null ? Math.round(run.memory / 1024) : undefined,
+    }
+  } catch (err) {
     return {
       success: false,
-      output: `⚙️  To enable live code execution:\n\n1. Go to rapidapi.com → search "Judge0 CE"\n2. Subscribe to free plan (50 runs/day)\n3. Copy your RapidAPI key\n4. Replace "SIGN_UP_FOR_KEY" in CodingPractice.jsx\n\nJavaScript runs live in the browser — try switching to JS!`,
-      type: 'Setup Required',
+      output: `⚠️ Execution failed: ${err.message}\n\nTip: JavaScript runs live in the browser without any API — try switching to JS.`,
+      type: 'Network Error',
     }
   }
 }

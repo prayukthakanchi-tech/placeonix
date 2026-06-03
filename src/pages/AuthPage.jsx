@@ -66,8 +66,8 @@ export default function AuthPage() {
         <p className="auth-kicker">Welcome to Placeonix</p>
         <h1>Your placement preparation starts here.</h1>
         <p>
-          Sign in to track your interviews, resume progress, aptitude practice,
-          streaks, XP, and placement readiness.
+          Sign in to access your personalised placement hub — department-specific
+          resources, practice tests, interview guides, and your progress tracker.
         </p>
       </section>
 
@@ -109,15 +109,15 @@ export default function AuthPage() {
             <label>
               Department
               <select value={branch} onChange={(event) => setBranch(event.target.value)}>
-                <option value="ECE">ECE</option>
-                <option value="CSE">CSE</option>
-                <option value="EEE">EEE</option>
-                <option value="IT">IT</option>
-                <option value="ME">ME</option>
-                <option value="CIVIL">CIVIL</option>
-                <option value="AERO">AERO</option>
-                <option value="BME">BME</option>
-                <option value="BT">BT</option>
+                <option value="CSE">Computer Science Engineering (CSE)</option>
+                <option value="IT">Information Technology (IT)</option>
+                <option value="ECE">Electronics &amp; Communication (ECE)</option>
+                <option value="EEE">Electrical &amp; Electronics (EEE)</option>
+                <option value="ME">Mechanical Engineering (ME)</option>
+                <option value="CIVIL">Civil Engineering (Civil)</option>
+                <option value="AERO">Aerospace Engineering (Aerospace)</option>
+                <option value="BME">Biomedical Engineering (Biomedical)</option>
+                <option value="BT">Biotechnology (BT)</option>
               </select>
             </label>
           )}

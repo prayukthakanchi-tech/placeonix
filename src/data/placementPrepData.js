@@ -528,7 +528,7 @@ export const PLACEMENT_PREP_DATA = {
       ],
       playlists: [
         { title: "NASA Glenn Research - Aerodynamics Basics", url: "https://www.grc.nasa.gov/www/k-12/airplane/index.html" },
-        { title: "NPTEL Flight Mechanics & Aircraft Dynamics", url: "https://www.youtube.com/playlist?list=PLyqSpQzTE6M_S5p3q_SNDsV1e0zXWwz1" }
+        { title: "NPTEL Aerospace Engineering Course", url: "https://nptel.ac.in/courses/101104025/" }
       ]
     },
     interview: {
@@ -596,7 +596,7 @@ export const PLACEMENT_PREP_DATA = {
         "Medical Imaging: Implementing thresholding and edge detection on MRI DICOM files in Python."
       ],
       playlists: [
-        { title: "Biomedical Signal Processing Tutorials", url: "https://www.youtube.com/playlist?list=PLTfCJuq2YtB0j3Hh9QZ8Wn3yU_eK_gYn3" }
+        { title: "MIT OCW Biomedical Signal & Image Processing", url: "https://ocw.mit.edu/courses/hst-582j-biomedical-signal-and-image-processing-spring-2007/" }
       ]
     },
     core: {

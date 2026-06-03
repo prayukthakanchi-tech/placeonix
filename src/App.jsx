@@ -61,7 +61,7 @@ export default function App() {
         <Topbar onMenuToggle={() => setMobileOpen(!mobileOpen)} />
         <main className="page-content">
           {activePage === 'dashboard' ? (
-            <Dashboard />
+            <Dashboard setActivePage={setActivePage} />
           ) : activePage === 'resources' ? (
             <Resources />
           ) : activePage === 'aptitude' ? (

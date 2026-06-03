@@ -1,4 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { useAuth } from '../context/AuthContext.jsx'
+import { doc, updateDoc } from 'firebase/firestore'
+import { db } from '../firebase/config'
+import { computeReadiness, parseInterviewScore } from '../utils/readiness.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 const DEPARTMENTS = ['CSE', 'ECE', 'EEE', 'IT', 'ME', 'CIVIL', 'AERO', 'BME', 'BT']
@@ -402,6 +406,63 @@ function LiveInterview({ onBack }) {
   const [qCount, setQCount] = useState(0)
   const [finalFeedback, setFinalFeedback] = useState('')
   const chatEndRef = useRef(null)
+  const { user, profile } = useAuth()
+
+  // ── Voice mode state ─────────────────────────────────────────
+  const [voiceMode, setVoiceMode] = useState(false)
+  const [listening, setListening] = useState(false)
+  const recognitionRef = useRef(null)
+
+  // Speak text via SpeechSynthesis (used when voice mode is on)
+  function speakText(text) {
+    if (!voiceMode || !window.speechSynthesis) return
+    window.speechSynthesis.cancel()
+    const clean = text.replace(/[#*_`~>]/g, '').replace(/\s+/g, ' ').trim()
+    const utter = new SpeechSynthesisUtterance(clean)
+    utter.rate = 0.95; utter.pitch = 1
+    const voices = window.speechSynthesis.getVoices()
+    const preferred = voices.find(v => v.lang.startsWith('en') && v.name.includes('Female'))
+      || voices.find(v => v.lang.startsWith('en'))
+    if (preferred) utter.voice = preferred
+    window.speechSynthesis.speak(utter)
+  }
+
+  // Toggle microphone — fills textarea with recognised speech
+  function toggleMic() {
+    if (!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      alert('Voice input is not supported in this browser. Please use Chrome.')
+      return
+    }
+    if (listening) {
+      recognitionRef.current?.stop(); setListening(false); return
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    const rec = new SR()
+    rec.lang = 'en-IN'; rec.interimResults = false; rec.maxAlternatives = 1
+    rec.onresult = (e) => {
+      const transcript = e.results[0][0].transcript
+      setInput(prev => prev ? prev + ' ' + transcript : transcript)
+    }
+    rec.onend = () => setListening(false)
+    rec.onerror = () => setListening(false)
+    recognitionRef.current = rec
+    rec.start(); setListening(true)
+  }
+
+  // Speak new AI messages when voice mode is active
+  const lastAIMsgRef = useRef('')
+  useEffect(() => {
+    const last = messages[messages.length - 1]
+    if (last?.role === 'assistant' && last.content !== lastAIMsgRef.current) {
+      lastAIMsgRef.current = last.content
+      speakText(last.content)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, voiceMode])
+
+  // Stop speech when component unmounts
+  useEffect(() => () => { window.speechSynthesis?.cancel(); recognitionRef.current?.stop() }, [])
+
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
 
@@ -435,6 +496,27 @@ Format: feedback on answer (if any), then next question. Keep it professional an
         const [before, after] = r.split('INTERVIEW_COMPLETE')
         setMessages(prev => [...prev, { role: 'assistant', content: before.trim() }])
         setFinalFeedback(after.trim()); setStage('result')
+
+        // ── Write interview score to Firestore ──────────────────
+        if (user) {
+          try {
+            const parsed = parseInterviewScore(after)
+            const prevBest = profile?.mockInterviewScore ?? 0
+            const newMockScore = Math.max(prevBest, parsed)
+            const newReadiness = computeReadiness({
+              aptitudeScore:      profile?.aptitudeScore ?? 0,
+              mockInterviewScore: newMockScore,
+              currentStreak:      profile?.currentStreak ?? 0,
+              codingScore:        profile?.codingScore ?? 0,
+            })
+            updateDoc(doc(db, 'users', user.uid), {
+              mockInterviewScore: newMockScore,
+              interviewsCompleted: (profile?.interviewsCompleted ?? 0) + 1,
+              lastInterviewDate:   new Date(),
+              placementReadiness:  newReadiness,
+            }).catch(() => {})
+          } catch (_) {}
+        }
       } else {
         setMessages(prev => [...prev, { role: 'assistant', content: r }]); setQCount(c => c + 1)
       }
@@ -513,15 +595,55 @@ Format: feedback on answer (if any), then next question. Keep it professional an
         )}
         <div ref={chatEndRef} />
       </div>
-      <div style={{ display: 'flex', gap: 10, padding: '14px 16px', background: '#fff', border: '1.5px solid var(--card-border)', borderTop: '1px solid #f3f4f6', borderRadius: '0 0 16px 16px', flexShrink: 0 }}>
-        <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }}} rows={2} disabled={loading} placeholder="Type your answer... (Enter to send)"
-          style={{ flex: 1, padding: '10px 14px', border: '1.5px solid var(--card-border)', borderRadius: 12, fontSize: 14, fontFamily: 'inherit', resize: 'none', outline: 'none', color: 'var(--text-primary)', background: loading ? '#f9fafb' : '#fff' }}
-          onFocus={e => e.target.style.borderColor = 'var(--purple-primary)'}
-          onBlur={e => e.target.style.borderColor = 'var(--card-border)'}
-        />
-        <button onClick={send} disabled={!input.trim() || loading} style={{ width: 46, height: 46, borderRadius: 12, border: 'none', alignSelf: 'flex-end', background: !input.trim() || loading ? '#e5e7eb' : 'var(--purple-primary)', color: !input.trim() || loading ? '#9ca3af' : '#fff', cursor: !input.trim() || loading ? 'not-allowed' : 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>↑</button>
+      {/* Input bar */}
+      <div style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderTop: '1px solid #f3f4f6', borderRadius: '0 0 16px 16px', flexShrink: 0 }}>
+        {/* Voice mode toggle bar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px 0 16px', borderBottom: '1px solid #f3f4f6' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Mode:</span>
+          {[['text','✏️ Text'], ['voice','🎙️ Voice']].map(([m, label]) => (
+            <button key={m} onClick={() => { setVoiceMode(m === 'voice'); window.speechSynthesis?.cancel(); recognitionRef.current?.stop(); setListening(false) }}
+              style={{ padding: '3px 12px', borderRadius: 999, border: '1.5px solid', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
+                borderColor: (voiceMode ? 'voice' : 'text') === m ? 'var(--purple-primary)' : 'var(--card-border)',
+                background:  (voiceMode ? 'voice' : 'text') === m ? 'var(--purple-xsoft)' : '#fff',
+                color:       (voiceMode ? 'voice' : 'text') === m ? 'var(--purple-primary)' : 'var(--text-muted)',
+              }}>{label}</button>
+          ))}
+          {voiceMode && <span style={{ marginLeft: 'auto', fontSize: 11.5, color: '#6b7280' }}>AI will speak responses · Mic fills input field</span>}
+        </div>
+
+        {/* Actual input */}
+        <div style={{ display: 'flex', gap: 10, padding: '10px 16px 14px 16px', alignItems: 'flex-end' }}>
+          <textarea value={input} onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }}}
+            rows={2} disabled={loading}
+            placeholder={voiceMode ? 'Click 🎙️ to speak, or type your answer...' : 'Type your answer... (Enter to send)'}
+            style={{ flex: 1, padding: '10px 14px', border: '1.5px solid var(--card-border)', borderRadius: 12, fontSize: 14, fontFamily: 'inherit', resize: 'none', outline: 'none', color: 'var(--text-primary)', background: loading ? '#f9fafb' : '#fff' }}
+            onFocus={e => e.target.style.borderColor = 'var(--purple-primary)'}
+            onBlur={e => e.target.style.borderColor = 'var(--card-border)'}
+          />
+          {voiceMode && (
+            <button onClick={toggleMic} disabled={loading}
+              title={listening ? 'Stop recording' : 'Start voice input'}
+              style={{ width: 46, height: 46, borderRadius: 12, border: 'none', alignSelf: 'flex-end', flexShrink: 0, cursor: loading ? 'not-allowed' : 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s',
+                background: listening ? '#fee2e2' : '#fce7f3',
+                color: listening ? '#dc2626' : '#db2777',
+                boxShadow: listening ? '0 0 0 4px rgba(239,68,68,0.2)' : 'none',
+                animation: listening ? 'micPulse 1.2s ease-in-out infinite' : 'none',
+              }}>{listening ? '⏹' : '🎙️'}</button>
+          )}
+          <button onClick={send} disabled={!input.trim() || loading}
+            style={{ width: 46, height: 46, borderRadius: 12, border: 'none', alignSelf: 'flex-end', flexShrink: 0,
+              background: !input.trim() || loading ? '#e5e7eb' : 'var(--purple-primary)',
+              color: !input.trim() || loading ? '#9ca3af' : '#fff',
+              cursor: !input.trim() || loading ? 'not-allowed' : 'pointer', fontSize: 20,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>↑</button>
+        </div>
       </div>
-      <style>{`@keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}`}</style>
+      <style>{`
+        @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
+        @keyframes micPulse{0%,100%{box-shadow:0 0 0 4px rgba(239,68,68,0.2)}50%{box-shadow:0 0 0 8px rgba(239,68,68,0.1)}}
+      `}</style>
     </div>
   )
 }
@@ -537,6 +659,7 @@ function ScoredMock({ onBack }) {
   const [loadingQ, setLoadingQ] = useState(false)
   const [loadingScore, setLoadingScore] = useState(false)
   const [scoreResult, setScoreResult] = useState('')
+  const { user, profile } = useAuth()
 
   async function loadQuestions() {
     setLoadingQ(true); setStage('test'); setQuestions([]); setAnswers({})
@@ -583,6 +706,27 @@ Give a detailed evaluation:
 ## 💪 Final Verdict`
       const result = await callClaude([{ role: 'user', content: prompt }], 'You are an expert interview evaluator. Be honest, specific, and encouraging.')
       setScoreResult(result)
+
+      // ── Write interview score to Firestore ──────────────────
+      if (user) {
+        try {
+          const parsed = parseInterviewScore(result)
+          const prevBest = profile?.mockInterviewScore ?? 0
+          const newMockScore = Math.max(prevBest, parsed)
+          const newReadiness = computeReadiness({
+            aptitudeScore:      profile?.aptitudeScore ?? 0,
+            mockInterviewScore: newMockScore,
+            currentStreak:      profile?.currentStreak ?? 0,
+            codingScore:        profile?.codingScore ?? 0,
+          })
+          updateDoc(doc(db, 'users', user.uid), {
+            mockInterviewScore: newMockScore,
+            interviewsCompleted: (profile?.interviewsCompleted ?? 0) + 1,
+            lastInterviewDate:   new Date(),
+            placementReadiness:  newReadiness,
+          }).catch(() => {})
+        } catch (_) {}
+      }
     } catch { setScoreResult('Failed to generate score. Please try again.') }
     setLoadingScore(false)
   }
