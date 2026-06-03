@@ -141,6 +141,66 @@ function getYoutubeThumbnail(url) {
   return 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?auto=format&fit=crop&w=400&q=80'
 }
 
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function highlightText(text, search) {
+  if (!text) return ''
+  if (!search) return text
+  const parts = text.split(new RegExp(`(${escapeRegExp(search)})`, 'gi'))
+  return (
+    <span>
+      {parts.map((part, i) => 
+        part.toLowerCase() === search.toLowerCase() ? (
+          <mark key={i} style={{ background: '#fde047', color: '#111827', padding: '1px 3px', borderRadius: 4, fontWeight: 'bold' }}>{part}</mark>
+        ) : part
+      )}
+    </span>
+  )
+}
+
+function getFilteredPrep(prep, searchQuery) {
+  if (!prep) return null
+  if (!searchQuery) return prep
+
+  const q = searchQuery.toLowerCase()
+
+  const filterSection = (section) => {
+    if (!section) return null
+    const descMatches = section.description?.toLowerCase().includes(q)
+    const filteredTopics = section.topics?.filter(topic => topic.toLowerCase().includes(q)) || []
+    const filteredPlaylists = section.playlists?.filter(pl => 
+      pl.title?.toLowerCase().includes(q) || pl.url?.toLowerCase().includes(q)
+    ) || []
+
+    return {
+      description: section.description,
+      topics: descMatches ? (section.topics || []) : filteredTopics,
+      playlists: descMatches ? (section.playlists || []) : filteredPlaylists
+    }
+  }
+
+  const filteredInterview = {}
+  if (prep.interview) {
+    Object.keys(prep.interview).forEach(catKey => {
+      const items = prep.interview[catKey] || []
+      const filteredItems = items.filter(qa => 
+        qa.question?.toLowerCase().includes(q) || qa.answer?.toLowerCase().includes(q)
+      )
+      filteredInterview[catKey] = filteredItems
+    })
+  }
+
+  return {
+    ...prep,
+    aptitude: filterSection(prep.aptitude),
+    coding: filterSection(prep.coding),
+    core: filterSection(prep.core),
+    interview: filteredInterview
+  }
+}
+
 export default function Resources() {
   const { user, profile } = useAuth()
   const [resources, setResources] = useState(() => 
@@ -262,7 +322,34 @@ export default function Resources() {
   }
 
   const prep = PLACEMENT_PREP_DATA[selectedDept]
+  const filteredPrep = getFilteredPrep(prep, searchQuery)
   const dStyle = DEPT_COLORS[selectedDept] || { text: 'var(--purple-primary)', bg: 'var(--purple-soft)', border: '1px solid var(--card-border)' }
+
+  const showAptitude = filteredPrep?.aptitude && (
+    !searchQuery ||
+    filteredPrep.aptitude.topics.length > 0 ||
+    filteredPrep.aptitude.playlists.length > 0 ||
+    filteredPrep.aptitude.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const showCoding = filteredPrep?.coding && (
+    !searchQuery ||
+    filteredPrep.coding.topics.length > 0 ||
+    filteredPrep.coding.playlists.length > 0 ||
+    filteredPrep.coding.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const showCore = filteredPrep?.core && (
+    !searchQuery ||
+    filteredPrep.core.topics.length > 0 ||
+    filteredPrep.core.playlists.length > 0 ||
+    filteredPrep.core.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
+  const hasSyllabusMatches = !searchQuery || (
+    showAptitude || showCoding || showCore || 
+    (filteredPrep?.interview && Object.values(filteredPrep.interview).some(arr => arr.length > 0))
+  )
 
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', paddingBottom: 60 }}>
@@ -386,7 +473,7 @@ export default function Resources() {
               <div style={{ color: 'var(--text-muted)', fontSize: 13.5, background: 'var(--card-bg)', padding: 20, borderRadius: 14 }}>No aptitude preparation resources matching active search query.</div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
-                {aptitudeResources.map(res => <ResourceCard key={res.id} res={res} onClick={() => handleResourceClick(res.id, res.url)} />)}
+                {aptitudeResources.map(res => <ResourceCard key={res.id} res={res} searchQuery={searchQuery} onClick={() => handleResourceClick(res.id, res.url)} />)}
               </div>
             )}
           </div>
@@ -400,7 +487,7 @@ export default function Resources() {
               <div style={{ color: 'var(--text-muted)', fontSize: 13.5, background: 'var(--card-bg)', padding: 20, borderRadius: 14 }}>No programming sheets or coding platforms matching active search query.</div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
-                {codingResources.map(res => <ResourceCard key={res.id} res={res} onClick={() => handleResourceClick(res.id, res.url)} />)}
+                {codingResources.map(res => <ResourceCard key={res.id} res={res} searchQuery={searchQuery} onClick={() => handleResourceClick(res.id, res.url)} />)}
               </div>
             )}
           </div>
@@ -414,7 +501,7 @@ export default function Resources() {
               <div style={{ color: 'var(--text-muted)', fontSize: 13.5, background: 'var(--card-bg)', padding: 20, borderRadius: 14 }}>No core subjects reference guides or playlists available yet.</div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
-                {coreResources.map(res => <ResourceCard key={res.id} res={res} onClick={() => handleResourceClick(res.id, res.url)} />)}
+                {coreResources.map(res => <ResourceCard key={res.id} res={res} searchQuery={searchQuery} onClick={() => handleResourceClick(res.id, res.url)} />)}
               </div>
             )}
           </div>
@@ -428,7 +515,7 @@ export default function Resources() {
               <div style={{ color: 'var(--text-muted)', fontSize: 13.5, background: 'var(--card-bg)', padding: 20, borderRadius: 14 }}>No foundational interview questions available yet for this branch.</div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
-                {interviewResources.map(res => <ResourceCard key={res.id} res={res} onClick={() => handleResourceClick(res.id, res.url)} />)}
+                {interviewResources.map(res => <ResourceCard key={res.id} res={res} searchQuery={searchQuery} onClick={() => handleResourceClick(res.id, res.url)} />)}
               </div>
             )}
           </div>
@@ -442,7 +529,7 @@ export default function Resources() {
               <div style={{ color: 'var(--text-muted)', fontSize: 13.5, background: 'var(--card-bg)', padding: 20, borderRadius: 14 }}>No mock assessments or assessment sheets found.</div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
-                {companyResources.map(res => <ResourceCard key={res.id} res={res} onClick={() => handleResourceClick(res.id, res.url)} />)}
+                {companyResources.map(res => <ResourceCard key={res.id} res={res} searchQuery={searchQuery} onClick={() => handleResourceClick(res.id, res.url)} />)}
               </div>
             )}
           </div>
@@ -450,204 +537,253 @@ export default function Resources() {
         </div>
       ) : (
         /* New Structured Prep Syllabus & Q&A View */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 36 }}>
-          
-          {/* Three Prep Pillars Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24 }}>
-            {/* Aptitude Pillar */}
-            {prep?.aptitude && (
-              <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 18, padding: 22, boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                    <div style={{ background: 'var(--purple-soft)', color: 'var(--purple-primary)', width: 38, height: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Brain size={20} />
-                    </div>
-                    <h3 style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)' }}>Aptitude & Reasoning Prep</h3>
-                  </div>
-                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>{prep.aptitude.description}</p>
-                  <div style={{ marginBottom: 20 }}>
-                    <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Syllabus Topics</h4>
-                    <ul style={{ paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {prep.aptitude.topics.map((topic, i) => <li key={i} style={{ lineHeight: 1.4 }}>{topic}</li>)}
-                    </ul>
-                  </div>
-                </div>
-                {prep.aptitude.playlists && prep.aptitude.playlists.length > 0 && (
-                  <div>
-                    <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Top Playlists & Portals</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {prep.aptitude.playlists.map((pl, i) => (
-                        <a key={i} href={pl.url} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--main-bg)', border: '1px solid var(--card-border)', borderRadius: 10, fontSize: 12.5, fontWeight: 700, color: dStyle.text, textDecoration: 'none', transition: 'all 0.2s' }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85%' }}>{pl.title}</span>
-                          <ExternalLink size={13} />
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Coding Pillar */}
-            {prep?.coding && (
-              <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 18, padding: 22, boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                    <div style={{ background: 'rgba(2,132,199,0.08)', color: '#0284c7', width: 38, height: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Code2 size={20} />
-                    </div>
-                    <h3 style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)' }}>Coding & Algorithmic Prep</h3>
-                  </div>
-                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>{prep.coding.description}</p>
-                  <div style={{ marginBottom: 20 }}>
-                    <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Syllabus Topics</h4>
-                    <ul style={{ paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {prep.coding.topics.map((topic, i) => <li key={i} style={{ lineHeight: 1.4 }}>{topic}</li>)}
-                    </ul>
-                  </div>
-                </div>
-                {prep.coding.playlists && prep.coding.playlists.length > 0 && (
-                  <div>
-                    <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Top Playlists & Sheets</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {prep.coding.playlists.map((pl, i) => (
-                        <a key={i} href={pl.url} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--main-bg)', border: '1px solid var(--card-border)', borderRadius: 10, fontSize: 12.5, fontWeight: 700, color: dStyle.text, textDecoration: 'none', transition: 'all 0.2s' }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85%' }}>{pl.title}</span>
-                          <ExternalLink size={13} />
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Core Subjects Pillar */}
-            {prep?.core && (
-              <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 18, padding: 22, boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                    <div style={{ background: 'rgba(234,88,12,0.08)', color: '#ea580c', width: 38, height: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Cpu size={20} />
-                    </div>
-                    <h3 style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)' }}>Core Subjects Prep</h3>
-                  </div>
-                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>{prep.core.description}</p>
-                  <div style={{ marginBottom: 20 }}>
-                    <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Syllabus Topics</h4>
-                    <ul style={{ paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {prep.core.topics.map((topic, i) => <li key={i} style={{ lineHeight: 1.4 }}>{topic}</li>)}
-                    </ul>
-                  </div>
-                </div>
-                {prep.core.playlists && prep.core.playlists.length > 0 && (
-                  <div>
-                    <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Top Playlists & Portals</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {prep.core.playlists.map((pl, i) => (
-                        <a key={i} href={pl.url} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--main-bg)', border: '1px solid var(--card-border)', borderRadius: 10, fontSize: 12.5, fontWeight: 700, color: dStyle.text, textDecoration: 'none', transition: 'all 0.2s' }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85%' }}>{pl.title}</span>
-                          <ExternalLink size={13} />
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+        !hasSyllabusMatches ? (
+          <div style={{ 
+            color: 'var(--text-secondary)', 
+            fontSize: 15, 
+            background: 'var(--card-bg)', 
+            padding: '40px 20px', 
+            borderRadius: 20, 
+            textAlign: 'center', 
+            border: '1.5px dashed var(--card-border)',
+            boxShadow: 'var(--shadow-card)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 12
+          }}>
+            <Search size={32} color={dStyle.text} />
+            <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--text-primary)' }}>No syllabus matches found</div>
+            <div>No topics, playlists, or Q&As in <strong>{DEPARTMENTS.find(d => d.key === selectedDept)?.name}</strong> match your search query "{searchQuery}".</div>
+            <button 
+              onClick={() => setSearchQuery('')}
+              style={{
+                marginTop: 8,
+                padding: '8px 16px',
+                background: dStyle.bg,
+                color: dStyle.text,
+                border: dStyle.border,
+                borderRadius: 8,
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+            >
+              Clear Search
+            </button>
           </div>
-
-          {/* Interactive Q&A Explorer Section */}
-          <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 20, padding: 24, boxShadow: 'var(--shadow-card)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24, paddingBottom: 12, borderBottom: '1.5px solid var(--card-border)' }}>
-              <HelpCircle size={24} color={dStyle.text} />
-              <div>
-                <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-primary)' }}>Foundational Interview Q&A Guides</h3>
-                <p style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>Click on questions to expand and study the model answers tailored to your department mappings.</p>
-              </div>
-            </div>
-
-            {prep?.interview && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-                {Object.keys(prep.interview).map(catKey => {
-                  const items = prep.interview[catKey] || []
-                  const categoryLabels = {
-                    conceptual: { title: "Conceptual — Theory-based Understanding", icon: "💡" },
-                    problemSolving: { title: "Problem-Solving — Analytical & Numerical Challenges", icon: "⚡" },
-                    applied: { title: "Applied — Real-world & Project Applications", icon: "🛠️" },
-                    hrStyle: { title: "HR-style — Behavioral & Teamwork Questions", icon: "👥" }
-                  }
-                  const label = categoryLabels[catKey] || { title: catKey, icon: "❓" }
-
-                  return (
-                    <div key={catKey}>
-                      <h4 style={{ fontSize: 14, fontWeight: 900, color: dStyle.text, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                        <span style={{ fontSize: 16 }}>{label.icon}</span> {label.title}
-                      </h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        {items.map((qa, index) => {
-                          const key = `${selectedDept}-${catKey}-${index}`
-                          const isOpen = !!expandedQuestions[key]
-                          return (
-                            <div key={index} style={{ border: '1.5px solid var(--card-border)', borderRadius: 12, overflow: 'hidden', background: isOpen ? 'var(--main-bg)' : 'transparent', transition: 'all 0.2s ease' }}>
-                              <button 
-                                onClick={() => toggleQuestion(key)}
-                                style={{
-                                  width: '100%',
-                                  padding: '14px 18px',
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  gap: 12,
-                                  textAlign: 'left',
-                                  fontWeight: 800,
-                                  fontSize: 13.5,
-                                  color: 'var(--text-primary)',
-                                  background: 'transparent',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                <span>{qa.question}</span>
-                                {isOpen ? <ChevronUp size={18} color={dStyle.text} /> : <ChevronDown size={18} color="var(--text-secondary)" />}
-                              </button>
-                              {isOpen && (
-                                <div style={{ padding: '16px 20px', borderTop: '1px solid var(--card-border)', fontSize: 13.5, color: 'var(--text-secondary)', lineHeight: 1.6, background: 'var(--card-bg)' }}>
-                                  {qa.answer.includes('```sql') || qa.answer.includes('```c') || qa.answer.includes('```javascript') ? (
-                                    <div style={{ whiteSpace: 'pre-wrap' }}>
-                                      {qa.answer.split('```').map((block, idx) => {
-                                        if (idx % 2 === 1) {
-                                          const codeLines = block.replace(/^(sql|c|javascript|python)/i, '').trim()
-                                          return (
-                                            <pre key={idx} style={{ background: 'var(--main-bg)', border: '1px solid var(--card-border)', padding: '12px 16px', borderRadius: 8, fontFamily: 'Fira Code, monospace', fontSize: 12.5, color: 'var(--text-primary)', overflowX: 'auto', margin: '12px 0' }}>
-                                              <code>{codeLines}</code>
-                                            </pre>
-                                          )
-                                        }
-                                        return <span key={idx}>{block}</span>
-                                      })}
-                                    </div>
-                                  ) : (
-                                    <div style={{ whiteSpace: 'pre-wrap' }}>{qa.answer}</div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 36 }}>
+            
+            {/* Three Prep Pillars Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24 }}>
+              {/* Aptitude Pillar */}
+              {showAptitude && (
+                <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 18, padding: 22, boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                      <div style={{ background: 'var(--purple-soft)', color: 'var(--purple-primary)', width: 38, height: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Brain size={20} />
+                      </div>
+                      <h3 style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)' }}>Aptitude & Reasoning Prep</h3>
+                    </div>
+                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>{highlightText(filteredPrep.aptitude.description, searchQuery)}</p>
+                    {filteredPrep.aptitude.topics && filteredPrep.aptitude.topics.length > 0 && (
+                      <div style={{ marginBottom: 20 }}>
+                        <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Syllabus Topics</h4>
+                        <ul style={{ paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {filteredPrep.aptitude.topics.map((topic, i) => <li key={i} style={{ lineHeight: 1.4 }}>{highlightText(topic, searchQuery)}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  {filteredPrep.aptitude.playlists && filteredPrep.aptitude.playlists.length > 0 && (
+                    <div>
+                      <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Top Playlists & Portals</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {filteredPrep.aptitude.playlists.map((pl, i) => (
+                          <a key={i} href={pl.url} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--main-bg)', border: '1px solid var(--card-border)', borderRadius: 10, fontSize: 12.5, fontWeight: 700, color: dStyle.text, textDecoration: 'none', transition: 'all 0.2s' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85%' }}>{highlightText(pl.title, searchQuery)}</span>
+                            <ExternalLink size={13} />
+                          </a>
+                        ))}
                       </div>
                     </div>
-                  )
-                })}
+                  )}
+                </div>
+              )}
+
+              {/* Coding Pillar */}
+              {showCoding && (
+                <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 18, padding: 22, boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                      <div style={{ background: 'rgba(2,132,199,0.08)', color: '#0284c7', width: 38, height: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Code2 size={20} />
+                      </div>
+                      <h3 style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)' }}>Coding & Algorithmic Prep</h3>
+                    </div>
+                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>{highlightText(filteredPrep.coding.description, searchQuery)}</p>
+                    {filteredPrep.coding.topics && filteredPrep.coding.topics.length > 0 && (
+                      <div style={{ marginBottom: 20 }}>
+                        <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Syllabus Topics</h4>
+                        <ul style={{ paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {filteredPrep.coding.topics.map((topic, i) => <li key={i} style={{ lineHeight: 1.4 }}>{highlightText(topic, searchQuery)}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  {filteredPrep.coding.playlists && filteredPrep.coding.playlists.length > 0 && (
+                    <div>
+                      <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Top Playlists & Sheets</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {filteredPrep.coding.playlists.map((pl, i) => (
+                          <a key={i} href={pl.url} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--main-bg)', border: '1px solid var(--card-border)', borderRadius: 10, fontSize: 12.5, fontWeight: 700, color: dStyle.text, textDecoration: 'none', transition: 'all 0.2s' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85%' }}>{highlightText(pl.title, searchQuery)}</span>
+                            <ExternalLink size={13} />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Core Subjects Pillar */}
+              {showCore && (
+                <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 18, padding: 22, boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                      <div style={{ background: 'rgba(234,88,12,0.08)', color: '#ea580c', width: 38, height: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Cpu size={20} />
+                      </div>
+                      <h3 style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)' }}>Core Subjects Prep</h3>
+                    </div>
+                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>{highlightText(filteredPrep.core.description, searchQuery)}</p>
+                    {filteredPrep.core.topics && filteredPrep.core.topics.length > 0 && (
+                      <div style={{ marginBottom: 20 }}>
+                        <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Syllabus Topics</h4>
+                        <ul style={{ paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {filteredPrep.core.topics.map((topic, i) => <li key={i} style={{ lineHeight: 1.4 }}>{highlightText(topic, searchQuery)}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  {filteredPrep.core.playlists && filteredPrep.core.playlists.length > 0 && (
+                    <div>
+                      <h4 style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>Top Playlists & Portals</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {filteredPrep.core.playlists.map((pl, i) => (
+                          <a key={i} href={pl.url} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--main-bg)', border: '1px solid var(--card-border)', borderRadius: 10, fontSize: 12.5, fontWeight: 700, color: dStyle.text, textDecoration: 'none', transition: 'all 0.2s' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85%' }}>{highlightText(pl.title, searchQuery)}</span>
+                            <ExternalLink size={13} />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Interactive Q&A Explorer Section */}
+            <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 20, padding: 24, boxShadow: 'var(--shadow-card)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24, paddingBottom: 12, borderBottom: '1.5px solid var(--card-border)' }}>
+                <HelpCircle size={24} color={dStyle.text} />
+                <div>
+                  <h3 style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-primary)' }}>Foundational Interview Q&A Guides</h3>
+                  <p style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>Click on questions to expand and study the model answers tailored to your department mappings.</p>
+                </div>
               </div>
-            )}
+
+              {filteredPrep?.interview && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+                  {Object.keys(filteredPrep.interview).map(catKey => {
+                    const items = filteredPrep.interview[catKey] || []
+                    if (items.length === 0) return null
+                    const categoryLabels = {
+                      conceptual: { title: "Conceptual — Theory-based Understanding", icon: "💡" },
+                      problemSolving: { title: "Problem-Solving — Analytical & Numerical Challenges", icon: "⚡" },
+                      applied: { title: "Applied — Real-world & Project Applications", icon: "🛠️" },
+                      hrStyle: { title: "HR-style — Behavioral & Teamwork Questions", icon: "👥" }
+                    }
+                    const label = categoryLabels[catKey] || { title: catKey, icon: "❓" }
+
+                    return (
+                      <div key={catKey}>
+                        <h4 style={{ fontSize: 14, fontWeight: 900, color: dStyle.text, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                          <span style={{ fontSize: 16 }}>{label.icon}</span> {label.title}
+                        </h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          {items.map((qa, index) => {
+                            const key = `${selectedDept}-${catKey}-${qa.question}`
+                            const matchesQuery = !!searchQuery && (
+                              qa.question.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                              qa.answer.toLowerCase().includes(searchQuery.toLowerCase())
+                            )
+                            const isOpen = !!expandedQuestions[key] || matchesQuery
+                            return (
+                              <div key={index} style={{ border: '1.5px solid var(--card-border)', borderRadius: 12, overflow: 'hidden', background: isOpen ? 'var(--main-bg)' : 'transparent', transition: 'all 0.2s ease' }}>
+                                <button 
+                                  onClick={() => toggleQuestion(key)}
+                                  style={{
+                                    width: '100%',
+                                    padding: '14px 18px',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    gap: 12,
+                                    textAlign: 'left',
+                                    fontWeight: 800,
+                                    fontSize: 13.5,
+                                    color: 'var(--text-primary)',
+                                    background: 'transparent',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  <span>{highlightText(qa.question, searchQuery)}</span>
+                                  {isOpen ? <ChevronUp size={18} color={dStyle.text} /> : <ChevronDown size={18} color="var(--text-secondary)" />}
+                                </button>
+                                {isOpen && (
+                                  <div style={{ padding: '16px 20px', borderTop: '1px solid var(--card-border)', fontSize: 13.5, color: 'var(--text-secondary)', lineHeight: 1.6, background: 'var(--card-bg)' }}>
+                                    {qa.answer.includes('```sql') || qa.answer.includes('```c') || qa.answer.includes('```javascript') ? (
+                                      <div style={{ whiteSpace: 'pre-wrap' }}>
+                                        {qa.answer.split('```').map((block, idx) => {
+                                          if (idx % 2 === 1) {
+                                            const codeLines = block.replace(/^(sql|c|javascript|python)/i, '').trim()
+                                            return (
+                                              <pre key={idx} style={{ background: 'var(--main-bg)', border: '1px solid var(--card-border)', padding: '12px 16px', borderRadius: 8, fontFamily: 'Fira Code, monospace', fontSize: 12.5, color: 'var(--text-primary)', overflowX: 'auto', margin: '12px 0' }}>
+                                                <code>{highlightText(codeLines, searchQuery)}</code>
+                                              </pre>
+                                            )
+                                          }
+                                          return <span key={idx}>{highlightText(block, searchQuery)}</span>
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <div style={{ whiteSpace: 'pre-wrap' }}>{highlightText(qa.answer, searchQuery)}</div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )
       )}
     </div>
   )
 }
 
-function ResourceCard({ res, onClick }) {
+function ResourceCard({ res, searchQuery, onClick }) {
   const isVideo = res.url?.includes('youtube.com') || res.url?.includes('youtu.be')
   const thumbnail = getYoutubeThumbnail(res.url)
   const dStyle = DEPT_COLORS[res.department] || { text: 'var(--purple-primary)', bg: 'var(--purple-soft)', border: '1px solid var(--card-border)' }
@@ -710,14 +846,18 @@ function ResourceCard({ res, onClick }) {
             )}
           </div>
 
-          <h3 style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 5, lineHeight: 1.35 }}>{res.title}</h3>
+          <h3 style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 5, lineHeight: 1.35 }}>
+            {highlightText(res.title, searchQuery)}
+          </h3>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span>📚</span>
-            <span style={{ fontWeight: 800, color: 'var(--text-secondary)' }}>{res.subject}</span>
+            <span style={{ fontWeight: 800, color: 'var(--text-secondary)' }}>{highlightText(res.subject, searchQuery)}</span>
           </div>
           
           {res.description && (
-            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5, margin: '6px 0 12px' }}>{res.description}</p>
+            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5, margin: '6px 0 12px' }}>
+              {highlightText(res.description, searchQuery)}
+            </p>
           )}
         </div>
       </div>
@@ -738,7 +878,7 @@ function ResourceCard({ res, onClick }) {
                   borderRadius: 6
                 }}
               >
-                {tag}
+                {highlightText(tag, searchQuery)}
               </span>
             ))}
           </div>
