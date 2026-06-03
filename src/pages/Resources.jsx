@@ -159,20 +159,21 @@ export default function Resources() {
 
   // Sync resources from database & auto-migrate/seed
   useEffect(() => {
-    const q = collection(db, 'resources')
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const list = []
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() })
-      })
+    let active = true
+    let unsubscribe = null
 
-      // Perform a silent migration / seeding if database is outdated or empty
-      const hasEmbeddedSystems = list.some(res => res.subject === 'Embedded Systems')
-      if (list.length === 0 || !hasEmbeddedSystems) {
-        console.log("Firestore resources empty or outdated. Upgrading database...")
-        try {
+    async function checkAndSeed() {
+      try {
+        const querySnapshot = await getDocs(collection(db, 'resources'))
+        const list = []
+        querySnapshot.forEach((doc) => {
+          list.push(doc.data())
+        })
+
+        const hasEmbeddedSystems = list.some(res => res.subject === 'Embedded Systems')
+        if (list.length === 0 || !hasEmbeddedSystems) {
+          console.log("Firestore resources empty or outdated. Upgrading database...")
           // Clean existing unmatching resources to prevent duplicates
-          const querySnapshot = await getDocs(collection(db, 'resources'))
           for (const docSnap of querySnapshot.docs) {
             await deleteDoc(doc(db, 'resources', docSnap.id))
           }
@@ -187,14 +188,32 @@ export default function Resources() {
             })
           }
           console.log("Database update & seeding completed.")
-        } catch (e) {
-          console.error("Database migration failed:", e)
         }
-      } else {
-        setResources(list)
+      } catch (e) {
+        console.error("Database migration failed:", e)
       }
+    }
+
+    checkAndSeed().then(() => {
+      if (!active) return
+      const q = collection(db, 'resources')
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const list = []
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() })
+        })
+        if (active) {
+          setResources(list)
+        }
+      }, (err) => {
+        console.error("Snapshot read error:", err)
+      })
     })
-    return () => unsubscribe()
+
+    return () => {
+      active = false
+      if (unsubscribe) unsubscribe()
+    }
   }, [])
 
   // Dynamic increment tracker
