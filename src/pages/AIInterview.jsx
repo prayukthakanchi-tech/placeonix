@@ -41,7 +41,8 @@ async function callClaude(messages, systemPrompt) {
   const data = await response.json()
 
   if (!response.ok) {
-    throw new Error(data?.error || 'AI service unavailable. Please try again.')
+    const errMsg = data?.detail || data?.error || 'AI service unavailable. Please try again.';
+    throw new Error(errMsg);
   }
 
   return (
@@ -185,8 +186,9 @@ Format: Just the question text, no numbering. Keep it conversational.`
       setCurrentQ(q)
       setQuizMessages([{ role: 'assistant', content: q }])
       setQuestionIndex(1)
-    } catch {
-      setCurrentQ('Failed to start. Please check your connection.')
+    } catch (err) {
+      console.error("AI Start Error in startQuiz:", err);
+      setCurrentQ(`Failed to start: ${err.message || err}`);
     }
     setLoading(false)
   }
@@ -490,7 +492,10 @@ Format: feedback on answer (if any), then next question. Keep it professional an
     try {
       const r = await callClaude([{ role: 'user', content: `Start. Briefly introduce yourself as ${form.company} interviewer and ask your first question.` }], sys)
       setMessages([{ role: 'assistant', content: r }]); setQCount(1)
-    } catch { setMessages([{ role: 'assistant', content: 'Failed to start. Please check connection.' }]) }
+    } catch (err) {
+      console.error("AI Start Error in start:", err);
+      setMessages([{ role: 'assistant', content: `Failed to start: ${err.message || err}` }]);
+    }
     setLoading(false)
   }
 
