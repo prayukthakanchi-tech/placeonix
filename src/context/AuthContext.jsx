@@ -57,7 +57,9 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser)
-      setLoading(false)
+      if (!currentUser) {
+        setLoading(false)
+      }
     })
 
     return unsubscribe
@@ -76,6 +78,7 @@ export function AuthProvider({ children }) {
       (snapshot) => {
         if (snapshot.exists()) {
           setProfile(snapshot.data())
+          setLoading(false)
           return
         }
 
@@ -98,9 +101,11 @@ export function AuthProvider({ children }) {
 
         setDoc(profileRef, defaultProfile, { merge: true })
         setProfile(defaultProfile)
+        setLoading(false)
       },
-      () => {
-        setProfile(null)
+      (err) => {
+        console.error('Profile fetch error:', err)
+        setLoading(false)
       }
     )
 

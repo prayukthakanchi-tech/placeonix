@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { useAuth } from '../context/AuthContext.jsx'
+import { doc, updateDoc } from 'firebase/firestore'
+import { db } from '../firebase/config'
+import { computeReadiness } from '../utils/readiness.js'
 
 // ── Judge0 language IDs ───────────────────────────────────────────
 const LANGUAGES = [
@@ -1281,58 +1285,68 @@ int main() {
 
 
 // ── Piston API runner (free, no key required) ─────────────────────
-const PISTON_LANGS = {
-  71: { language: 'python',     version: '3.10.0',  ext: 'py'   },
-  62: { language: 'java',       version: '15.0.2',  ext: 'java' },
-  54: { language: 'c++',        version: '10.2.0',  ext: 'cpp'  },
-  63: { language: 'javascript', version: '18.15.0', ext: 'js'   },
-  50: { language: 'c',          version: '10.2.0',  ext: 'c'    },
+const WANDBOX_LANGS = {
+  71: { compiler: 'cpython-3.13.8' },
+  62: { compiler: 'openjdk-jdk-22+36' },
+  54: { compiler: 'gcc-13.2.0' },
+  63: { compiler: 'nodejs-20.17.0' },
+  50: { compiler: 'gcc-13.2.0-c' },
 }
 
-async function runCode(sourceCode, languageId) {
-  const langConfig = PISTON_LANGS[languageId]
+async function runCode(sourceCode, languageId, retries = 3) {
+  const langConfig = WANDBOX_LANGS[languageId]
   if (!langConfig) return { success: false, output: 'Language not supported', type: 'Error' }
 
-  try {
-    const res = await fetch('https://emkc.org/api/v2/piston/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        language: langConfig.language,
-        version:  langConfig.version,
-        files: [{ name: `main.${langConfig.ext}`, content: sourceCode }],
-      }),
-    })
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch('https://wandbox.org/api/compile.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          compiler: langConfig.compiler,
+          code: sourceCode,
+        }),
+      })
 
-    if (!res.ok) throw new Error(`Server returned ${res.status}`)
-    const data = await res.json()
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      const data = await res.json()
 
-    // Compile error (for Java / C / C++)
-    const compileData = data.compile || {}
-    if (compileData.code !== undefined && compileData.code !== 0) {
-      const compileOut = (compileData.stderr || compileData.output || 'Compile error').trim()
-      return { success: false, output: compileOut, type: 'Compile Error' }
-    }
+      // Compile error
+      if (data.compiler_error || (data.status != 0 && !data.program_message)) {
+        const compileOut = (data.compiler_error || data.compiler_message || 'Compile error').trim()
+        if (compileOut.includes('Resource temporarily unavailable') && attempt < retries) {
+          await new Promise(r => setTimeout(r, 1200))
+          continue
+        }
+        if (compileOut) return { success: false, output: compileOut, type: 'Compile Error' }
+      }
 
-    const run = data.run || {}
-    const stdout = (run.stdout || '').trim()
-    const stderr = (run.stderr || '').trim()
+      const stdout = (data.program_output || '').trim()
+      const stderr = (data.program_error || '').trim()
 
-    if (run.code !== 0 && stderr) {
-      return { success: false, output: stderr, type: 'Runtime Error' }
-    }
+      if (stderr.includes('Resource temporarily unavailable') && attempt < retries) {
+        await new Promise(r => setTimeout(r, 1200))
+        continue
+      }
 
-    return {
-      success: true,
-      output: stdout || '(no output)',
-      time: run.cpu_time != null ? run.cpu_time.toFixed(3) : undefined,
-      memory: run.memory != null ? Math.round(run.memory / 1024) : undefined,
-    }
-  } catch (err) {
-    return {
-      success: false,
-      output: `⚠️ Execution failed: ${err.message}\n\nTip: JavaScript runs live in the browser without any API — try switching to JS.`,
-      type: 'Network Error',
+      if (data.status != 0 && stderr) {
+        return { success: false, output: stderr, type: 'Runtime Error' }
+      }
+
+      return {
+        success: true,
+        output: stdout || stderr || '(no output)',
+      }
+    } catch (err) {
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 1200))
+        continue
+      }
+      return {
+        success: false,
+        output: `⚠️ Execution failed after ${retries} attempts: ${err.message}\n\nTip: JavaScript runs live in the browser without any API — try switching to JS.`,
+        type: 'Network Error',
+      }
     }
   }
 }
@@ -1395,12 +1409,12 @@ function ProblemList({ problems, selected, onSelect, filter, setFilter, search, 
           <span style={{ fontSize: 11, color: 'var(--purple-primary)', fontWeight: 700 }}>{solvedCount} / {problems.length}</span>
         </div>
         <div style={{ height: 5, borderRadius: 999, background: '#e5e7eb', overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${(solvedCount / problems.length) * 100}%`, background: 'linear-gradient(90deg, #7c3aed, #6366f1)', borderRadius: 999, transition: 'width 0.4s ease' }} />
+          <div style={{ height: '100%', width: `${Math.min(100, (solvedCount / 10) * 100)}%`, background: 'linear-gradient(90deg, #7c3aed, #6366f1)', borderRadius: 999, transition: 'width 0.4s ease' }} />
         </div>
       </div>
 
       {/* Problem list */}
-      <div style={{ flex: 1, overflowY: 'auto', maxHeight: 'calc(100vh - 330px)' }}>
+      <div className="responsive-list-height">
         {filtered.length === 0
           ? <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No problems match filters</div>
           : filtered.map(p => {
@@ -1543,7 +1557,7 @@ function ProblemPanel({ problem, activeTab, setActiveTab, onMarkSolved, isSolved
   )
 }
 
-function CodeEditor({ problem, lang, setLang, code, setCode, output, running, onRun, onReset }) {
+function CodeEditor({ problem, lang, setLang, code, setCode, output, running, onRun, onReset, analyzing, onAnalyze }) {
   const lineCount = code.split('\n').length
   const lineNumRef = useRef(null)
   const textareaRef = useRef(null)
@@ -1590,7 +1604,7 @@ function CodeEditor({ problem, lang, setLang, code, setCode, output, running, on
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#1e1e2e', borderRadius: 16, overflow: 'hidden', border: '1.5px solid #2d2d3f' }}>
       {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: '#16162a', borderBottom: '1px solid #2d2d3f', flexShrink: 0 }}>
+      <div className="responsive-toolbar">
         <div style={{ display: 'flex', gap: 5 }}>
           {['#ff5f57','#ffbd2e','#28ca41'].map((c, i) => <div key={i} style={{ width: 11, height: 11, borderRadius: 999, background: c }} />)}
         </div>
@@ -1631,7 +1645,7 @@ function CodeEditor({ problem, lang, setLang, code, setCode, output, running, on
       </div>
 
       {/* Action bar */}
-      <div style={{ display: 'flex', gap: 8, padding: '9px 14px', background: '#16162a', borderTop: '1px solid #2d2d3f', flexShrink: 0, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, padding: '9px 14px', background: '#16162a', borderTop: '1px solid #2d2d3f', flexShrink: 0, alignItems: 'center', flexWrap: 'wrap' }}>
         <button onClick={onReset}
           style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid #2d2d3f', background: 'transparent', color: '#6b7280', fontSize: 12, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}
           onMouseEnter={e => e.currentTarget.style.borderColor = '#4b4b6b'}
@@ -1651,6 +1665,16 @@ function CodeEditor({ problem, lang, setLang, code, setCode, output, running, on
             : '▶ Run Code'
           }
         </button>
+        {output?.success && (
+          <button onClick={onAnalyze} disabled={analyzing}
+            style={{ padding: '7px 20px', borderRadius: 8, border: 'none', cursor: analyzing ? 'not-allowed' : 'pointer', fontSize: 12.5, fontFamily: 'inherit', fontWeight: 700, transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: 6,
+              background: analyzing ? '#2d2d3f' : 'linear-gradient(135deg, #10b981, #059669)',
+              color: analyzing ? '#6b7280' : '#fff',
+              boxShadow: analyzing ? 'none' : '0 2px 8px rgba(16,185,129,0.4)',
+            }}>
+            {analyzing ? 'Analyzing...' : '🤖 AI Review'}
+          </button>
+        )}
       </div>
 
       {/* Resize handle */}
@@ -1672,6 +1696,14 @@ function CodeEditor({ problem, lang, setLang, code, setCode, output, running, on
         }
       </div>
 
+      {/* AI Analysis output */}
+      {problem.analysis && (
+        <div style={{ padding: '12px 16px', background: '#ecfdf5', borderTop: '1px solid #10b981', overflowY: 'auto', flexShrink: 0, maxHeight: 200, fontSize: 13, color: '#065f46', lineHeight: 1.6 }}>
+          <div style={{ fontWeight: 800, marginBottom: 8, color: '#047857' }}>🤖 AI Code Review & Hidden Tests</div>
+          <div style={{ whiteSpace: 'pre-line' }}>{problem.analysis}</div>
+        </div>
+      )}
+
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
@@ -1689,6 +1721,8 @@ export default function CodingPractice() {
   const [view, setView]           = useState('split')
   const [output, setOutput]       = useState(null)
   const [running, setRunning]     = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analysisMap, setAnalysisMap] = useState({})
 
   // Per-problem, per-language code map (persisted in state)
   const [codeMap, setCodeMap] = useState(() => {
@@ -1701,16 +1735,46 @@ export default function CodingPractice() {
     return map
   })
 
-  // Solved set persisted in localStorage
-  const [solved, setSolved] = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('placeonix_solved') || '[]')) }
-    catch { return new Set() }
-  })
+  const { user, profile } = useAuth()
+  const solvedKey = `placeonix_solved_${user?.uid || 'guest'}`
+  const codeKey_ls = `placeonix_code_${user?.uid || 'guest'}`
+
+  // Solved set — per user, persisted in localStorage
+  const [solved, setSolved] = useState(() => new Set())
+
+  // Reload solved set whenever the logged-in user changes
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(solvedKey) || '[]')
+      setSolved(new Set(stored))
+    } catch {
+      setSolved(new Set())
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solvedKey])
+
+  // Reload code editor content when user changes
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(codeKey_ls) || 'null')
+      if (saved && typeof saved === 'object') {
+        setCodeMap(saved)
+      }
+    } catch {
+      // If parse fails, keep default starter code
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codeKey_ls])
 
   const codeKey = `${selected.id}-${lang}`
   const code = codeMap[codeKey] || ''
 
-  const setCode = (val) => setCodeMap(prev => ({ ...prev, [codeKey]: val }))
+  const setCode = (val) => setCodeMap(prev => {
+    const next = { ...prev, [codeKey]: val }
+    // Persist editor content per user
+    try { localStorage.setItem(codeKey_ls, JSON.stringify(next)) } catch {}
+    return next
+  })
 
   function selectProblem(p) {
     setSelected(p)
@@ -1749,6 +1813,37 @@ export default function CodingPractice() {
     setRunning(false)
   }
 
+  async function handleAnalyze() {
+    if (!code.trim() || !output?.success) return
+    setAnalyzing(true)
+    try {
+      const prompt = `Act as a strict Senior Engineer and automated test engine. I have solved the problem "${selected.title}".
+      
+My Code:
+${code}
+
+Please do the following:
+1. HIDDEN TESTS: Mentally run my code against 2 edge case hidden tests. Tell me if it passes or fails them.
+2. COMPLEXITY: State the Time (Big-O) and Space complexity.
+3. REVIEW: Briefly tell me if it's memory-heavy and how to optimize it.
+
+Keep it concise, formatting with bullet points.`
+      
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: prompt })
+      })
+      if (!res.ok) throw new Error('API failed')
+      const data = await res.json()
+      
+      setAnalysisMap(prev => ({ ...prev, [codeKey]: data.response }))
+    } catch (err) {
+      setAnalysisMap(prev => ({ ...prev, [codeKey]: '⚠️ Failed to fetch AI review. Try again.' }))
+    }
+    setAnalyzing(false)
+  }
+
   function handleReset() {
     setCodeMap(prev => ({ ...prev, [codeKey]: selected.starterCode[lang] || '' }))
     setOutput(null)
@@ -1759,13 +1854,31 @@ export default function CodingPractice() {
       const next = new Set(prev)
       if (next.has(selected.id)) next.delete(selected.id)
       else next.add(selected.id)
-      localStorage.setItem('placeonix_solved', JSON.stringify([...next]))
+      localStorage.setItem(solvedKey, JSON.stringify([...next]))
+
+      // Write coding score to Firestore so readiness formula reflects real progress
+      if (user) {
+        try {
+          const REQUIRED_MASTERY = 10
+          const codingScore = Math.min(100, Math.round((next.size / REQUIRED_MASTERY) * 100))
+          updateDoc(doc(db, 'users', user.uid), {
+            codingScore,
+            placementReadiness: computeReadiness({
+              aptitudeScore:      profile?.aptitudeScore      ?? 0,
+              mockInterviewScore: profile?.mockInterviewScore ?? 0,
+              currentStreak:      profile?.currentStreak     ?? 0,
+              codingScore,
+            }),
+          }).catch(() => {})
+        } catch (_) {}
+      }
+
       return next
     })
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 130px)', minHeight: 600 }}>
+    <div className="responsive-app-height">
       {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexShrink: 0, flexWrap: 'wrap' }}>
         <div>
@@ -1798,7 +1911,7 @@ export default function CodingPractice() {
       </div>
 
       {/* Main layout */}
-      <div style={{ display: 'flex', gap: 12, flex: 1, overflow: 'hidden' }}>
+      <div className="responsive-split">
         {(view === 'split' || view === 'problem') && (
           <ProblemList
             problems={PROBLEMS} selected={selected} onSelect={selectProblem}
@@ -1816,10 +1929,13 @@ export default function CodingPractice() {
         )}
         {(view === 'split' || view === 'editor') && (
           <CodeEditor
-            problem={selected} lang={lang} setLang={changeLang}
+            problem={{ ...selected, analysis: analysisMap[codeKey] }} lang={lang} setLang={changeLang}
             code={code} setCode={setCode}
             output={output} running={running}
-            onRun={handleRun} onReset={handleReset}
+            onRun={handleRun}
+            onReset={handleReset}
+            analyzing={analyzing}
+            onAnalyze={handleAnalyze}
           />
         )}
       </div>

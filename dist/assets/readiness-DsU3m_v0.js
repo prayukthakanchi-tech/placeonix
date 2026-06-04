@@ -1,0 +1,1 @@
+function s({aptitudeScore:n,mockInterviewScore:t,currentStreak:r,codingScore:a}){const e=Math.min(100,(r??0)*10);return Math.min(100,Math.round((n??0)*.3+(t??0)*.4+e*.2+(a??0)*.1))}function o(n){if(!n)return 0;const t=n.match(/(\d+)\s*\/\s*10/);if(t){const r=parseInt(t[1],10);return Math.min(100,Math.max(0,Math.round(r/10*100)))}return 0}export{s as c,o as p};

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   ArrowRight,
   BookOpen,
@@ -25,7 +25,7 @@ import {
   Clock,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
-import { doc, updateDoc } from 'firebase/firestore'
+import { doc, updateDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { computeReadiness } from '../utils/readiness.js'
 
@@ -71,18 +71,18 @@ const QUICK_NAV = [
 // Pillar 3: Core Subjects→ streak-based proxy     (consistent daily study indicator)
 // Pillar 4: Interview    → profile.mockInterviewScore (written by AI Interview on complete)
 const DEPT_PILLARS = {
-  CSE:   ['Aptitude & Reasoning', 'Data Structures & Algorithms', 'OS, DBMS & Networks',         'Interview Readiness'],
-  IT:    ['Aptitude & Reasoning', 'Web Dev & SQL Coding',          'System Design & Cloud',        'Interview Readiness'],
-  ECE:   ['Aptitude & Reasoning', 'C / Verilog / MATLAB',          'Analog & Digital Circuits',    'Interview Readiness'],
-  EEE:   ['Aptitude & Reasoning', 'MATLAB / C Scripting',          'Electrical Machines & Power',  'Interview Readiness'],
-  ME:    ['Aptitude & Reasoning', 'CAD & Python Scripting',         'Thermodynamics & Fluid',       'Interview Readiness'],
-  CIVIL: ['Aptitude & Reasoning', 'Excel / VBA Scripting',         'Structural & Geotech Design',  'Interview Readiness'],
-  AERO:  ['Aptitude & Reasoning', 'MATLAB / Simulation Tools',     'Aerodynamics & Propulsion',    'Interview Readiness'],
-  BME:   ['Aptitude & Reasoning', 'Python / MATLAB',               'Bio-instrumentation & Imaging','Interview Readiness'],
-  BT:    ['Aptitude & Reasoning', 'Bioinformatics & Python',       'Molecular Biology & Genetics', 'Interview Readiness'],
+  CSE:   ['Aptitude & Reasoning', 'Data Structures & Algorithms', 'Interview Readiness'],
+  IT:    ['Aptitude & Reasoning', 'Web Dev & SQL Coding',         'Interview Readiness'],
+  ECE:   ['Aptitude & Reasoning', 'C / Verilog / MATLAB',         'Interview Readiness'],
+  EEE:   ['Aptitude & Reasoning', 'MATLAB / C Scripting',         'Interview Readiness'],
+  ME:    ['Aptitude & Reasoning', 'CAD & Python Scripting',       'Interview Readiness'],
+  CIVIL: ['Aptitude & Reasoning', 'Excel / VBA Scripting',        'Interview Readiness'],
+  AERO:  ['Aptitude & Reasoning', 'MATLAB / Simulation Tools',    'Interview Readiness'],
+  BME:   ['Aptitude & Reasoning', 'Python / MATLAB',              'Interview Readiness'],
+  BT:    ['Aptitude & Reasoning', 'Bioinformatics & Python',      'Interview Readiness'],
 }
 
-const PILLAR_COLORS = ['#6c3ce1', '#f97316', '#3b82f6', '#22c55e']
+const PILLAR_COLORS = ['#6c3ce1', '#3b82f6', '#22c55e']
 
 // ── Department-aware daily student messages ────────────────────
 // 7 messages per dept — indexed by (dayOfYear % 7), so each day = new message.
@@ -179,16 +179,26 @@ function getGreeting() {
   return 'Good evening'
 }
 
+function getISTDate(date) {
+  const utc = date.getTime() + (date.getTimezoneOffset() * 60000)
+  return new Date(utc + (3600000 * 5.5))
+}
+
 function isSameDay(d1, d2) {
-  return d1.getFullYear() === d2.getFullYear() &&
-         d1.getMonth()    === d2.getMonth()    &&
-         d1.getDate()     === d2.getDate()
+  const ist1 = getISTDate(d1)
+  const ist2 = getISTDate(d2)
+  return ist1.getFullYear() === ist2.getFullYear() &&
+         ist1.getMonth()    === ist2.getMonth()    &&
+         ist1.getDate()     === ist2.getDate()
 }
 
 function isYesterday(d1, today) {
-  const y = new Date(today)
-  y.setDate(today.getDate() - 1)
-  return isSameDay(d1, y)
+  const ist1 = getISTDate(d1)
+  const istToday = getISTDate(today)
+  istToday.setDate(istToday.getDate() - 1)
+  return ist1.getFullYear() === istToday.getFullYear() &&
+         ist1.getMonth()    === istToday.getMonth()    &&
+         ist1.getDate()     === istToday.getDate()
 }
 
 // ── Circular progress ring ─────────────────────────────────────
@@ -211,6 +221,16 @@ function CircularProgress({ value, size = 52 }) {
 // ── Dashboard ──────────────────────────────────────────────────
 export default function Dashboard({ setActivePage }) {
   const { user, profile } = useAuth()
+  const [notifications, setNotifications] = useState([])
+
+  // ── Fetch active notifications ──────────────────────────────────
+  useEffect(() => {
+    const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'))
+    const unsub = onSnapshot(q, snap => {
+      setNotifications(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    })
+    return unsub
+  }, [])
 
   // ── Read all real Firestore fields ───────────────────────────
   const displayName       = profile?.name || user?.displayName || user?.email?.split('@')[0] || 'Student'
@@ -237,9 +257,11 @@ export default function Dashboard({ setActivePage }) {
 
     try {
       const ref = doc(db, 'users', user.uid)
-      const newStreak = !last || isYesterday(last, today)
-        ? (profile.currentStreak ?? 0) + 1
-        : 1
+      const newStreak = !last 
+        ? 0 
+        : isYesterday(last, today)
+          ? (profile.currentStreak ?? 0) + 1
+          : 1
 
       // Recompute readiness with new streak
       const newReadiness = computeReadiness({
@@ -259,9 +281,8 @@ export default function Dashboard({ setActivePage }) {
   }, [user, profile])
 
   // ── Skill pillars — each maps to a REAL Firestore field ──────
-  const streakBonus = Math.min(100, currentStreak * 10) // 10 days = 100% core study proxy
   const pillars = (DEPT_PILLARS[branch] || DEPT_PILLARS.CSE).map((name, i) => {
-    const values = [aptitudeScore, codingScore, streakBonus, mockScore]
+    const values = [aptitudeScore, codingScore, mockScore]
     return { name, pct: Math.min(100, values[i] ?? 0), color: PILLAR_COLORS[i] }
   })
 
@@ -296,8 +317,83 @@ export default function Dashboard({ setActivePage }) {
 
   const activeDept = DEPTS.find(d => d.key === branch)
 
+  const activeNotifications = notifications.filter(n => n.targetDept === 'ALL' || n.targetDept === branch)
+
   return (
     <div>
+      {/* ── Notification Banner ───────────────────────────────────── */}
+      {activeNotifications.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+          {activeNotifications.map(n => (
+            <div key={n.id} style={{ background: n.type === 'alert' ? '#fee2e2' : n.type === 'success' ? '#dcfce7' : n.type === 'warning' ? '#fef3c7' : '#e0e7ff', border: `1.5px solid ${n.type === 'alert' ? '#fca5a5' : n.type === 'success' ? '#86efac' : n.type === 'warning' ? '#fde047' : '#c7d2fe'}`, borderRadius: 12, padding: '16px 20px', display: 'flex', gap: 16, alignItems: 'center' }}>
+              <div style={{ fontSize: 24 }}>
+                {n.type === 'alert' ? '🚨' : n.type === 'success' ? '✅' : n.type === 'warning' ? '⚠️' : '🔔'}
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: '#111827', marginBottom: 2 }}>{n.title}</div>
+                <div style={{ fontSize: 13.5, color: '#374151', lineHeight: 1.4 }}>{n.message}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── New User Onboarding Card ── */}
+      {readiness === 0 && !profile?.lastAptitudeAttempt && !profile?.lastInterviewDate && (
+        <div style={{
+          background: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)',
+          border: '1.5px solid #c4b5fd', borderRadius: 18, padding: '22px 26px',
+          marginBottom: 24,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <span style={{ fontSize: 22 }}>🚀</span>
+            <div>
+              <div style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 17, color: '#4c1d95' }}>
+                Welcome to Placeonix! Here's where to start.
+              </div>
+              <div style={{ fontSize: 12.5, color: '#7c3aed', marginTop: 2 }}>
+                Complete these steps to unlock your placement readiness score.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+            {[
+              { step: '1', icon: '👤', label: 'Set your branch', sub: 'Open Profile → save your department', page: 'profile', done: !!profile?.branch },
+              { step: '2', icon: '🧠', label: 'Take an Aptitude Quiz', sub: 'Builds your aptitude score (30%)', page: 'aptitude', done: !!profile?.lastAptitudeAttempt },
+              { step: '3', icon: '🤖', label: 'Do a Mock Interview', sub: 'Unlocks interview score (40%)', page: 'interview', done: !!profile?.lastInterviewDate },
+              { step: '4', icon: '💻', label: 'Solve a Coding Problem', sub: 'Adds to your coding score (10%)', page: 'coding', done: !!profile?.codingScore },
+            ].map(item => (
+              <button
+                key={item.step}
+                onClick={() => go(item.page)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px',
+                  background: item.done ? '#f0fdf4' : '#fff',
+                  border: `1.5px solid ${item.done ? '#86efac' : '#ddd6fe'}`,
+                  borderRadius: 12, cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
+                  fontFamily: 'inherit',
+                }}
+                onMouseEnter={e => { if (!item.done) e.currentTarget.style.borderColor = '#7c3aed' }}
+                onMouseLeave={e => { if (!item.done) e.currentTarget.style.borderColor = '#ddd6fe' }}
+              >
+                <div style={{
+                  width: 32, height: 32, borderRadius: 999, flexShrink: 0,
+                  background: item.done ? '#dcfce7' : '#ede9fe',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
+                }}>
+                  {item.done ? '✅' : item.icon}
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: item.done ? '#16a34a' : '#1f1535' }}>
+                    {item.label}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#6b7280', marginTop: 1 }}>{item.sub}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Hero ── */}
       <section className="hero-section hero-aurora" style={{ marginBottom: 28 }}>
@@ -310,27 +406,6 @@ export default function Dashboard({ setActivePage }) {
           <button className="btn-primary" type="button" onClick={() => go('resources')}>
             Open Placement Hub <ArrowRight size={17} aria-hidden="true" />
           </button>
-        </div>
-
-        <div className="hero-ring-group" aria-hidden="true">
-          <div className="hero-ring-card">
-            <CircularProgress value={readiness} size={72} />
-            <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--purple-primary)', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Readiness</div>
-          </div>
-          <div className="hero-ring-card hero-ring-card--sm">
-            <div style={{ fontSize: 26, fontWeight: 900, fontFamily: 'Syne, sans-serif', color: 'var(--text-primary)', lineHeight: 1 }}>
-              {currentStreak}
-            </div>
-            <Flame size={18} color="#f97316" />
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>Day Streak</div>
-          </div>
-          <div className="hero-ring-card hero-ring-card--sm">
-            <div style={{ fontSize: 26, fontWeight: 900, fontFamily: 'Syne, sans-serif', color: 'var(--text-primary)', lineHeight: 1 }}>
-              {bestStreak}
-            </div>
-            <Star size={18} color="#6c3ce1" />
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>Best Streak</div>
-          </div>
         </div>
       </section>
 
@@ -546,7 +621,7 @@ export default function Dashboard({ setActivePage }) {
 
         {/* Sources legend */}
         <div style={{ marginBottom: 16, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          Aptitude updates after each quiz · Interview updates after each AI session · Core Subjects reflects your daily streak · Coding updates when you complete coding sessions
+          Aptitude updates after each quiz · Coding updates when you complete coding sessions · Interview updates after each AI session
         </div>
 
         {noProgress && (

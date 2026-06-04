@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { doc, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { computeReadiness } from '../utils/readiness.js'
+import { Sparkles, Bot, Loader2 } from 'lucide-react'
 
 // ─── Helpers ─────────────────────────────────────────────────────
 function shuffle(arr) {
@@ -280,6 +281,11 @@ function PracticeSection({ sectionId, onBack }) {
         const pct = Math.round((s / activeQuestions.length) * 100)
         const prevBest = profile?.aptitudeScore ?? 0
         const newAptitudeScore = Math.max(prevBest, pct)
+
+        // Per-section best score (stored independently)
+        const prevSectionBest = profile?.sectionScores?.[sectionId] ?? 0
+        const newSectionScore = Math.max(prevSectionBest, pct)
+
         const newReadiness = computeReadiness({
           aptitudeScore:      newAptitudeScore,
           mockInterviewScore: profile?.mockInterviewScore ?? 0,
@@ -290,6 +296,7 @@ function PracticeSection({ sectionId, onBack }) {
           aptitudeScore:       newAptitudeScore,
           placementReadiness:  newReadiness,
           lastAptitudeAttempt: new Date(),
+          [`sectionScores.${sectionId}`]: newSectionScore,
         }).catch(() => {})
       } catch (_) {}
     }
@@ -512,11 +519,130 @@ function MockTest({ onBack }) {
   )
 }
 
+// ─── AI Adaptive Practice Engine ────────────────────────────────────
+function AdaptivePracticeSection({ onBack, branch }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [q, setQ] = useState(null)
+  
+  const [difficulty, setDifficulty] = useState('Medium')
+  const [stats, setStats] = useState({ correct: 0, total: 0 })
+  const [userAns, setUserAns] = useState(null)
+
+  const generateNext = async (lastCorrect = null, lastTopic = null) => {
+    setLoading(true)
+    setError(null)
+    setUserAns(null)
+    
+    try {
+      let prompt = `You are an Adaptive Aptitude Test engine for a ${branch} engineering student. 
+Generate EXACTLY ONE multiple-choice question. Format ONLY as a valid JSON object.
+Format: { "id": "uniq", "difficulty": "Easy|Medium|Hard", "topic": "e.g. Probability", "q": "Question?", "options": ["A","B","C","D"], "ans": 0, "explanation": "Why" }`
+
+      if (lastCorrect === true) {
+        prompt += `\nThe student got the last ${lastTopic} question CORRECT. Increase difficulty or pick a new topic.`
+      } else if (lastCorrect === false) {
+        prompt += `\nThe student got the last ${lastTopic} question WRONG. They are struggling. Generate a slightly easier question on ${lastTopic} to help them learn.`
+      } else {
+        prompt += `\nGenerate the first question at Medium difficulty.`
+      }
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: prompt })
+      })
+      if (!res.ok) throw new Error('Failed to generate question')
+      const data = await res.json()
+      
+      let jsonStr = data.response.replace(/```json/g, '').replace(/```/g, '').trim()
+      const parsed = JSON.parse(jsonStr)
+      
+      setQ({ ...parsed, id: `ai-${Date.now()}` })
+      setDifficulty(parsed.difficulty)
+    } catch (err) {
+      console.error(err)
+      setError('Failed to generate adaptive question. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { generateNext() }, [])
+
+  const handleAnswer = (optIdx) => {
+    if (userAns !== null) return
+    setUserAns(optIdx)
+    const isCorrect = optIdx === q.ans
+    setStats(s => ({ correct: s.correct + (isCorrect ? 1 : 0), total: s.total + 1 }))
+  }
+
+  return (
+    <div style={{ maxWidth: 740, margin: '0 auto', paddingBottom: 60 }}>
+      <button onClick={onBack} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}>
+        ← Back to Aptitude
+      </button>
+
+      <div style={{ marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 26, color: 'var(--text-primary)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Sparkles color="#8b5cf6" size={26} /> AI Adaptive Engine
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: 0 }}>
+            Difficulty automatically adjusts based on your performance.
+          </p>
+        </div>
+        <div style={{ background: 'var(--purple-xsoft)', border: '1.5px solid var(--purple-primary)', padding: '10px 20px', borderRadius: 12, textAlign: 'center' }}>
+           <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--purple-primary)', textTransform: 'uppercase', letterSpacing: 1 }}>Score</div>
+           <div style={{ fontSize: 22, fontWeight: 900, color: 'var(--purple-primary)', fontFamily: 'Urbanist, sans-serif' }}>{stats.correct} <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>/ {stats.total}</span></div>
+        </div>
+      </div>
+
+      {error ? (
+        <div style={{ padding: 24, background: '#fee2e2', color: '#991b1b', borderRadius: 12, border: '1px solid #fca5a5', textAlign: 'center' }}>{error}</div>
+      ) : loading || !q ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', color: 'var(--text-muted)', background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 16 }}>
+          <Loader2 size={40} className="lucide-spin" style={{ color: 'var(--purple-primary)', marginBottom: 16 }} />
+          <p style={{ fontSize: 16, fontWeight: 600 }}>{stats.total === 0 ? 'Warming up adaptive engine...' : 'Analyzing weaknesses & generating next question...'}</p>
+        </div>
+      ) : (
+        <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, alignItems: 'center' }}>
+             <span style={{ fontSize: 12, fontWeight: 700, background: '#f3f4f6', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: 999 }}>Topic: {q.topic}</span>
+             <span style={{ fontSize: 12, fontWeight: 800, padding: '4px 10px', borderRadius: 999, 
+                color: q.difficulty === 'Hard' ? '#dc2626' : q.difficulty === 'Medium' ? '#d97706' : '#16a34a',
+                background: q.difficulty === 'Hard' ? '#fee2e2' : q.difficulty === 'Medium' ? '#fef3c7' : '#dcfce7'
+             }}>Level: {q.difficulty}</span>
+          </div>
+          <QuestionCard 
+            q={q} 
+            index={0} 
+            submitted={userAns !== null} 
+            userAnswer={userAns} 
+            onAnswer={(_, opt) => handleAnswer(opt)} 
+          />
+          
+          {userAns !== null && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16, animation: 'fadeIn 0.3s' }}>
+              <button onClick={() => generateNext(userAns === q.ans, q.topic)} style={{ padding: '12px 32px', background: 'var(--purple-primary)', color: '#fff', border: 'none', borderRadius: 999, fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                Next Question →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: translateY(0) } }`}</style>
+    </div>
+  )
+}
+
 // ─── Main Aptitude page ───────────────────────────────────────────
 export default function Aptitude() {
-  const [active, setActive] = useState(null) // null = home, 'quant'|'logical'|'verbal'|'technical'|'mock'
+  const [active, setActive] = useState(null) // null = home, 'quant'|'logical'|'verbal'|'technical'|'mock'|'ai-custom'
+  const { profile }         = useAuth()
 
   if (active === 'mock') return <MockTest onBack={() => setActive(null)} />
+  if (active === 'ai-custom') return <AdaptivePracticeSection branch={profile?.branch || 'Engineering'} onBack={() => setActive(null)} />
   if (active) return <PracticeSection sectionId={active} onBack={() => setActive(null)} />
 
   const totalQ = Object.values(QUESTIONS).reduce((sum, arr) => sum + arr.length, 0)
@@ -533,16 +659,15 @@ export default function Aptitude() {
       </div>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 28 }}>
+      <div style={{ display: 'flex', gap: 14, marginBottom: 28 }}>
         {[
-          { icon: '📚', label: 'Total Questions', value: `${totalQ}`, color: '#ede9fe' },
-          { icon: '🏢', label: 'Companies Covered', value: 'TCS · Infosys · Wipro · Accenture', color: '#dcfce7', small: true },
-          { icon: '🎯', label: 'Topics', value: '4 Sections', color: '#dbeafe' },
+          { icon: '📚', label: 'Total Questions', value: `${totalQ}+`, color: '#ede9fe' },
+          { icon: '🎯', label: 'Topics', value: '4 Core Sections', color: '#dbeafe' },
         ].map(s => (
-          <div key={s.label} style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 14, padding: '16px 20px', display: 'flex', gap: 14, alignItems: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div key={s.label} style={{ flex: 1, background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 14, padding: '16px 20px', display: 'flex', gap: 14, alignItems: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
             <div style={{ width: 42, height: 42, borderRadius: 12, background: s.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>{s.icon}</div>
             <div>
-              <div style={{ fontFamily: s.small ? 'inherit' : 'Urbanist, sans-serif', fontWeight: 800, fontSize: s.small ? 12 : 22, color: 'var(--text-primary)', lineHeight: 1.2 }}>{s.value}</div>
+              <div style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 800, fontSize: 22, color: 'var(--text-primary)', lineHeight: 1.2 }}>{s.value}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{s.label}</div>
             </div>
           </div>
@@ -551,7 +676,9 @@ export default function Aptitude() {
 
       {/* Section cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginBottom: 20 }}>
-        {SECTION_META.map(s => (
+        {SECTION_META.map(s => {
+          const bestPct = profile?.sectionScores?.[s.id] ?? null
+          return (
           <div
             key={s.id}
             onClick={() => setActive(s.id)}
@@ -575,15 +702,32 @@ export default function Aptitude() {
               {s.icon}
             </div>
             <div style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 800, fontSize: 17, color: 'var(--text-primary)', marginBottom: 6 }}>{s.label}</div>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>{s.desc}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>{s.desc}</div>
+
+            {/* Per-section best score bar */}
+            {bestPct !== null ? (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 5 }}>
+                  <span>Your Best</span>
+                  <span style={{ color: s.color }}>{bestPct}%</span>
+                </div>
+                <div style={{ height: 6, background: '#f3f4f6', borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{ width: `${bestPct}%`, height: '100%', background: s.color, borderRadius: 999, transition: 'width 0.8s ease' }} />
+                </div>
+              </div>
+            ) : (
+              <div style={{ marginBottom: 14, fontSize: 11.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>Not attempted yet</div>
+            )}
+
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: s.color, background: s.bg, padding: '3px 10px', borderRadius: 999 }}>
                 {QUESTIONS[s.id].length} Questions
               </span>
-              <span style={{ color: s.color, fontWeight: 700, fontSize: 15 }}>Start →</span>
+              <span style={{ color: s.color, fontWeight: 700, fontSize: 15 }}>{bestPct !== null ? 'Retry →' : 'Start →'}</span>
             </div>
           </div>
-        ))}
+          )
+        })}
 
         {/* Mock Test card */}
         <div
@@ -593,6 +737,7 @@ export default function Aptitude() {
             border: '1.5px solid #6c3ce1',
             borderRadius: 16, padding: '22px', cursor: 'pointer',
             boxShadow: '0 4px 16px rgba(108,60,225,0.25)', transition: 'all 0.2s',
+            display: 'flex', flexDirection: 'column'
           }}
           onMouseEnter={e => {
             e.currentTarget.style.transform  = 'translateY(-3px)'
@@ -605,8 +750,8 @@ export default function Aptitude() {
         >
           <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, marginBottom: 14 }}>⏱️</div>
           <div style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 800, fontSize: 17, color: '#fff', marginBottom: 6 }}>Full Mock Test</div>
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.8)', lineHeight: 1.6, marginBottom: 16 }}>
-            15 questions across all sections with a 15-minute timer. Simulates real placement aptitude tests.
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.8)', lineHeight: 1.6, marginBottom: 16, flex: 1 }}>
+            15 questions across all sections with a 15-minute timer. Simulates real placement tests.
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: '#fff', background: 'rgba(255,255,255,0.2)', padding: '3px 10px', borderRadius: 999 }}>
@@ -614,6 +759,41 @@ export default function Aptitude() {
             </span>
             <span style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>Start →</span>
           </div>
+        </div>
+
+        {/* AI Custom Practice Card */}
+        <div
+          onClick={() => setActive('ai-custom')}
+          style={{
+            background: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)', 
+            border: '1.5px solid #c4b5fd',
+            borderRadius: 16, padding: '22px', cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(139, 92, 246, 0.1)', transition: 'all 0.2s',
+            display: 'flex', flexDirection: 'column'
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.transform = 'translateY(-3px)'
+            e.currentTarget.style.boxShadow = '0 8px 24px rgba(139, 92, 246, 0.2)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.transform = 'translateY(0)'
+            e.currentTarget.style.boxShadow = '0 4px 12px rgba(139, 92, 246, 0.1)'
+          }}
+        >
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', marginBottom: 14 }}>
+            <Sparkles size={24} />
+          </div>
+          <div style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 800, fontSize: 17, color: '#4c1d95', marginBottom: 6 }}>
+            AI Custom Practice
+          </div>
+          <div style={{ fontSize: 13, color: '#6d28d9', lineHeight: 1.6, marginBottom: 14, flex: 1 }}>
+            Generate unlimited dynamic aptitude questions perfectly tailored for your department ({profile?.branch || 'Engineering'}).
+          </div>
+          <button 
+            style={{ width: '100%', padding: '10px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          >
+            <Bot size={16} /> Generate Questions
+          </button>
         </div>
       </div>
 

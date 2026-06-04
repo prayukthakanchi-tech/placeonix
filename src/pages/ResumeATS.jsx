@@ -108,10 +108,10 @@ function TrustBar() {
     { icon: '🛡️', text: 'Secure Payments' },
   ]
   return (
-    <div style={{ background: 'rgba(255,255,255,0.06)', borderTop: '1px solid rgba(255,255,255,0.08)', borderBottom: '1px solid rgba(255,255,255,0.08)', padding: '12px 0' }}>
+    <div style={{ background: 'var(--card-bg)', borderTop: '1px solid var(--card-border)', borderBottom: '1px solid var(--card-border)', padding: '12px 0' }}>
       <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', justifyContent: 'center', gap: 32, flexWrap: 'wrap', padding: '0 24px' }}>
         {items.map((item, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: 'rgba(255,255,255,0.75)', fontWeight: 600 }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
             <span>{item.icon}</span><span>{item.text}</span>
           </div>
         ))}
@@ -246,29 +246,26 @@ function ATSChecker({ onUpgrade }) {
 
 function RejectionSection() {
   const reasons = [
-    { icon: '📐', title: 'Poor Formatting', desc: 'Tables, images, and fancy layouts confuse ATS systems and get your resume rejected instantly.' },
-    { icon: '💬', title: 'Weak Project Descriptions', desc: 'Vague descriptions like "worked on a project" tell recruiters nothing. They want impact and numbers.' },
-    { icon: '🔑', title: 'Missing Keywords', desc: 'ATS filters scan for specific skills and keywords. If they\'re not there, your resume never reaches a human.' },
-    { icon: '📋', title: 'Generic Resumes', desc: 'One-size-fits-all resumes don\'t work. Recruiters want to see alignment with their specific requirements.' },
-    { icon: '🤖', title: 'ATS Incompatibility', desc: 'Even well-written resumes fail if they use the wrong file format, fonts, or section headings.' },
-    { icon: '📎', title: 'Irrelevant Information', desc: 'Hobbies, personal photos, and unrelated experience waste precious space and dilute your profile.' },
+    { icon: '📐', title: 'Poor Formatting & Layout' },
+    { icon: '🔑', title: 'Missing Industry Keywords' },
+    { icon: '💬', title: 'Weak Impact Metrics' },
+    { icon: '📋', title: 'Generic & Vague Phrasing' },
+    { icon: '🤖', title: 'Hidden ATS Parse Errors' },
+    { icon: '📎', title: 'Irrelevant Filler Content' },
   ]
   return (
-    <div style={{ padding: '60px 0', background: '#fff' }}>
+    <div style={{ padding: '60px 0', background: 'var(--bg-secondary)' }}>
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '0 24px' }}>
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={{ display: 'inline-block', background: '#fef2f2', color: '#dc2626', fontSize: 12, fontWeight: 700, padding: '4px 14px', borderRadius: 999, border: '1px solid #fca5a5', marginBottom: 12 }}>WHY STUDENTS GET REJECTED</div>
-          <h2 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 28, color: '#111827', marginBottom: 12 }}>6 Reasons Your Resume Gets Filtered Out</h2>
-          <p style={{ fontSize: 15, color: '#6b7280', maxWidth: 560, margin: '0 auto' }}>Recruiters spend an average of 7 seconds on a resume. ATS systems spend even less. Here's what's killing your chances.</p>
+          <h2 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 28, color: 'var(--text-primary)', marginBottom: 12 }}>6 Reasons Your Resume Gets Filtered Out</h2>
+          <p style={{ fontSize: 15, color: 'var(--text-secondary)', maxWidth: 560, margin: '0 auto' }}>Recruiters spend an average of 7 seconds on a resume. ATS systems spend even less. Here's what's killing your chances.</p>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
           {reasons.map((r, i) => (
-            <div key={i} style={{ padding: '22px 20px', background: '#fafafa', border: '1.5px solid #f3f4f6', borderRadius: 14, transition: 'all 0.2s' }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = '#7c3aed'; e.currentTarget.style.background = '#f5f3ff' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = '#f3f4f6'; e.currentTarget.style.background = '#fafafa' }}>
-              <div style={{ fontSize: 28, marginBottom: 10 }}>{r.icon}</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#111827', marginBottom: 6 }}>{r.title}</div>
-              <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.7 }}>{r.desc}</div>
+            <div key={i} style={{ padding: '16px 20px', background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 14, display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ fontSize: 24 }}>{r.icon}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}>{r.title}</div>
             </div>
           ))}
         </div>
@@ -453,41 +450,15 @@ function PaymentModal({ plan, onClose, onSuccess }) {
 
   const upd = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
-  // Step 2 — Razorpay
-  async function handlePayment() {
-    setPaying(true)
-    const loaded = await loadRazorpay()
-    if (!loaded) { alert('Failed to load payment gateway. Please check your internet connection.'); setPaying(false); return }
-
+  // Step 2 — Manual UPI
+  function handleUPIPayment() {
+    if (!paymentId || paymentId.length < 8) {
+      alert('Please enter a valid 12-digit UTR or Transaction ID.')
+      return
+    }
     const generatedOrderId = generateOrderId()
     setOrderId(generatedOrderId)
-
-    const options = {
-      key: RAZORPAY_KEY,
-      amount: plan.price * 100, // paise
-      currency: 'INR',
-      name: 'Placeonix',
-      description: plan.name,
-      image: 'https://placeonix-theta.vercel.app/favicon.ico',
-      prefill: { name: form.name || user?.displayName, email: form.email, contact: form.mobile },
-      notes: { plan: plan.id, orderId: generatedOrderId },
-      theme: { color: '#7c3aed' },
-      modal: { ondismiss: () => { setPaying(false) } },
-      handler: function (response) {
-        setPaymentId(response.razorpay_payment_id)
-        setPaying(false)
-        setStep(3)
-      },
-    }
-
-    try {
-      const rzp = new window.Razorpay(options)
-      rzp.on('payment.failed', () => { setPaying(false); alert('Payment failed. Please try again.') })
-      rzp.open()
-    } catch {
-      setPaying(false)
-      alert('Payment gateway error. Please try again.')
-    }
+    setStep(3)
   }
 
   // Step 3 → 4 — Submit to Firestore
@@ -499,6 +470,19 @@ function PaymentModal({ plan, onClose, onSuccess }) {
     }
     setSubmitting(true)
     try {
+      // 1. Upload to Cloudinary
+      const formData = new FormData()
+      formData.append('file', form.file)
+      formData.append('upload_preset', 'placeonix_resumes')
+      
+      const cloudinaryRes = await fetch(`https://api.cloudinary.com/v1_1/dcrllhmii/upload`, {
+        method: 'POST',
+        body: formData
+      })
+      if (!cloudinaryRes.ok) throw new Error('Failed to upload file to Cloudinary')
+      const uploadResult = await cloudinaryRes.json()
+
+      // 2. Save Order to Firestore
       const docRef = await addDoc(collection(db, 'orders'), {
         orderId,
         planId: plan.id,
@@ -510,6 +494,7 @@ function PaymentModal({ plan, onClose, onSuccess }) {
         customerEmail: form.email,
         customerMobile: form.mobile,
         resumeFileName: form.file.name,
+        resumeUrl: uploadResult.secure_url,
         jobRole: form.jobRole,
         branch: form.branch,
         graduationYear: form.graduationYear,
@@ -588,27 +573,61 @@ function PaymentModal({ plan, onClose, onSuccess }) {
           {/* Step 2 — Payment */}
           {step === 2 && (
             <div>
-              <div style={{ textAlign: 'center', marginBottom: 24 }}>
+              <div style={{ textAlign: 'center', marginBottom: 20 }}>
                 <div style={{ fontSize: 36, fontWeight: 900, color: '#7c3aed', marginBottom: 4 }}>₹{plan.price}</div>
                 <div style={{ fontSize: 14, color: '#6b7280' }}>for {plan.name}</div>
               </div>
-              <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 14, padding: '16px 18px', marginBottom: 20 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 12 }}>PAYMENT METHODS ACCEPTED</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {['UPI', 'Google Pay', 'PhonePe', 'Paytm', 'Razorpay', 'Debit Card', 'Credit Card', 'Net Banking'].map(m => (
-                    <span key={m} style={{ padding: '4px 10px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 7, fontSize: 12, color: '#374151', fontWeight: 600 }}>{m}</span>
-                  ))}
+
+              {/* PhonePe QR Card */}
+              <div style={{ background: 'linear-gradient(135deg, #f5f3ff 0%, #fff 100%)', border: '2px solid #7c3aed', borderRadius: 18, padding: '24px 20px', marginBottom: 20, textAlign: 'center', boxShadow: '0 8px 32px rgba(124,58,237,0.12)' }}>
+                {/* PhonePe Header */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 8 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#5f259f', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 900, fontSize: 16, fontFamily: 'serif' }}>Pe</div>
+                  <span style={{ fontWeight: 900, fontSize: 20, color: '#1a1a2e', letterSpacing: 0.5 }}>PhonePe</span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#5f259f', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4 }}>ACCEPTED HERE</div>
+                <div style={{ fontSize: 12.5, color: '#6b7280', marginBottom: 18 }}>Scan &amp; Pay Using PhonePe App</div>
+
+                {/* QR Code Image */}
+                <div style={{ display: 'inline-block', background: '#fff', border: '3px solid #e5e7eb', borderRadius: 14, padding: 10, marginBottom: 16, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
+                  <img
+                    src="/phonepe-qr.png"
+                    alt="PhonePe QR Code - Kanchi Prayuktha"
+                    style={{ width: 220, height: 'auto', objectFit: 'contain', display: 'block', borderRadius: 8 }}
+                    onError={e => {
+                      // Fallback if image not found
+                      e.target.style.display = 'none'
+                      e.target.parentElement.innerHTML = '<div style="width:190px;height:190px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#9ca3af"><span style="font-size:40px">📱</span><span style="font-size:11px;font-weight:600">QR Loading...</span></div>'
+                    }}
+                  />
+                </div>
+
+                {/* Account Name */}
+                <div style={{ fontWeight: 800, fontSize: 15, color: '#111827', marginBottom: 14 }}>Kanchi Prayuktha</div>
+
+                {/* Amount reminder */}
+                <div style={{ background: '#ede9fe', border: '1.5px solid #c4b5fd', borderRadius: 10, padding: '10px 16px', marginBottom: 4, display: 'inline-block' }}>
+                  <span style={{ fontSize: 13, color: '#5b21b6', fontWeight: 700 }}>Pay exactly </span>
+                  <span style={{ fontSize: 16, color: '#7c3aed', fontWeight: 900 }}>₹{plan.price}</span>
+                  <span style={{ fontSize: 13, color: '#5b21b6', fontWeight: 700 }}> via PhonePe / GPay / Paytm</span>
                 </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b7280', marginBottom: 20, justifyContent: 'center' }}>
-                <span>🔒</span><span>Secure Payment Protected by Razorpay</span>
+
+              {/* UTR Input */}
+              <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 14, padding: '18px', marginBottom: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#111827', marginBottom: 4 }}>After paying, enter your Transaction ID</div>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>Find the 12-digit UTR number in your PhonePe / GPay transaction history</div>
+                <label style={{ fontSize: 12.5, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 5 }}>Transaction ID / UTR Number *</label>
+                <input type="text" value={paymentId || ''} onChange={e => setPaymentId(e.target.value)} placeholder="e.g. 312345678901" required
+                  style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #e5e7eb', borderRadius: 9, fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', transition: 'border-color 0.2s' }}
+                  onFocus={e => e.target.style.borderColor = '#7c3aed'}
+                  onBlur={e => e.target.style.borderColor = '#e5e7eb'}
+                />
               </div>
-              <button onClick={handlePayment} disabled={paying}
-                style={{ width: '100%', padding: '14px', background: paying ? '#f3f4f6' : 'linear-gradient(135deg, #6c3ce1, #7c3aed)', color: paying ? '#9ca3af' : '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: paying ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                {paying
-                  ? <><span style={{ width: 16, height: 16, border: '2px solid #d1d5db', borderTopColor: '#7c3aed', borderRadius: 999, display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />Opening Razorpay...</>
-                  : `Pay ₹${plan.price} Securely →`
-                }
+
+              <button onClick={handleUPIPayment}
+                style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #6c3ce1, #7c3aed)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                Confirm Payment & Proceed →
               </button>
             </div>
           )}
@@ -679,7 +698,7 @@ function PaymentModal({ plan, onClose, onSuccess }) {
                   ['Package', plan.name],
                   ['Payment', `₹${plan.price} — Paid`],
                   ['Estimated Delivery', plan.delivery],
-                  ['Support', 'support@placeonix.com'],
+                  ['Support', 'prayukthakanchi@gmail.com'],
                 ].map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid #f3f4f6', fontSize: 13 }}>
                     <span style={{ color: '#6b7280', fontWeight: 600 }}>{k}</span>
@@ -760,9 +779,10 @@ function FAQSection() {
     { q: 'Which file formats are accepted?', a: 'We accept PDF, DOC, and DOCX formats. We recommend uploading a PDF to preserve formatting, but any of the three formats will work.' },
     { q: 'Can freshers use this service?', a: 'Absolutely — this service is specifically designed for freshers, final-year students, and early career professionals. All recommendations are tailored to placement-focused resumes, not experienced professional CVs.' },
     { q: 'Is my resume reviewed manually?', a: 'Yes. All plans include a manual review by a real person, not just an automated tool. This is what makes our insights actionable and context-aware.' },
-    { q: 'Can I request changes after delivery?', a: 'For the Resume Upgrade and Placement Success Pack, we offer one round of revision if you feel something doesn\'t match your expectations. Contact us at support@placeonix.com.' },
+    { q: 'Can I request changes after delivery?', a: 'For the Resume Upgrade and Placement Success Pack, we offer one round of revision if you feel something doesn\'t match your expectations. Contact us at prayukthakanchi@gmail.com.' },
     { q: 'Is my information secure?', a: 'Yes. Your resume and personal details are stored securely and are never shared with third parties. We use encrypted storage and access control on all submitted data.' },
     { q: 'What happens after payment?', a: 'After payment, you\'ll be asked to submit your resume and details through a secure form. You\'ll receive an order confirmation with a unique Order ID. Our team will begin the review and deliver results within the promised timeframe.' },
+    { q: 'Have more questions?', a: 'Contact us anytime at prayukthakanchi@gmail.com.' },
   ]
   return (
     <div style={{ padding: '60px 0', background: '#f9fafb' }}>

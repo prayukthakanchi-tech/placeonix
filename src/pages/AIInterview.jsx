@@ -19,45 +19,37 @@ const ROLES = {
 }
 const COMPANIES = ['TCS', 'Infosys', 'Wipro', 'Accenture', 'Cognizant', 'Amazon', 'Google', 'Microsoft', 'Qualcomm', 'Bosch', 'Medtronic', 'Biocon', 'L&T', 'ISRO', 'Other']
 const LEVELS = ['Fresher (0 exp)', 'Intern', '1–2 years exp']
+const FOCUS_TYPES = ['Technical & HR (Mixed)', 'HR & Behavioral Only', 'Technical Core Only']
 const QUIZ_COUNT = 7 // questions in prepare quiz before plan
 
-// ── Claude API ───────────────────────────────────────────────────
+// ── Gemini AI Proxy ───────────────────────────────────────────────
+// Calls /api/chat (Vercel serverless function) — API key stays server-side.
 async function callClaude(messages, systemPrompt) {
   const prompt =
     systemPrompt +
     "\n\n" +
     messages.map(m => `${m.role}: ${m.content}`).join("\n")
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt,
-              },
-            ],
-          },
-        ],
-      }),
-    }
-  )
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+    }),
+  })
 
   const data = await response.json()
 
-  console.log("GEMINI RESPONSE:", data)
+  if (!response.ok) {
+    throw new Error(data?.error || 'AI service unavailable. Please try again.')
+  }
 
   return (
     data?.candidates?.[0]?.content?.parts?.[0]?.text ||
     'No response generated.'
   )
 }
+
 
 // ── Shared UI ────────────────────────────────────────────────────
 function SelectField({ label, value, onChange, options, placeholder }) {
@@ -399,7 +391,7 @@ Be specific to their answers — address their weak areas and build on their str
 // ══════════════════════════════════════════════════════════════════
 function LiveInterview({ onBack }) {
   const [stage, setStage] = useState('setup')
-  const [form, setForm] = useState({ company: '', dept: '', role: '', level: 'Fresher (0 exp)', rounds: 7 })
+  const [form, setForm] = useState({ company: '', dept: '', role: '', level: 'Fresher (0 exp)', focus: 'Technical & HR (Mixed)', rounds: 7 })
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -411,6 +403,7 @@ function LiveInterview({ onBack }) {
   // ── Voice mode state ─────────────────────────────────────────
   const [voiceMode, setVoiceMode] = useState(false)
   const [listening, setListening] = useState(false)
+  const [voiceStats, setVoiceStats] = useState({ totalMs: 0, fillerCount: 0 })
   const recognitionRef = useRef(null)
 
   // Speak text via SpeechSynthesis (used when voice mode is on)
@@ -439,9 +432,20 @@ function LiveInterview({ onBack }) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     const rec = new SR()
     rec.lang = 'en-IN'; rec.interimResults = false; rec.maxAlternatives = 1
+    
+    const sessionStart = Date.now()
+
     rec.onresult = (e) => {
       const transcript = e.results[0][0].transcript
       setInput(prev => prev ? prev + ' ' + transcript : transcript)
+      
+      const sessionMs = Date.now() - sessionStart
+      const fillers = (transcript.match(/\b(um|uh|like|literally|you know)\b/gi) || []).length
+      
+      setVoiceStats(prev => ({ 
+        totalMs: prev.totalMs + sessionMs, 
+        fillerCount: prev.fillerCount + fillers 
+      }))
     }
     rec.onend = () => setListening(false)
     rec.onerror = () => setListening(false)
@@ -466,13 +470,18 @@ function LiveInterview({ onBack }) {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
 
+  const focusPrompt = 
+    form.focus === 'HR & Behavioral Only' ? 'Focus strictly on behavioral, leadership, teamwork, handling failure, and culture-fit scenarios using the STAR method. DO NOT ask technical questions.' :
+    form.focus === 'Technical Core Only' ? `Focus strictly on deep technical questions, architecture, and coding concepts relevant to ${form.role}. DO NOT ask HR/behavioral questions.` :
+    `Mix technical and HR questions relevant to ${form.dept} and ${form.role}`;
+
   const sys = `You are a professional interviewer at ${form.company} for the role of ${form.role} (${form.dept}, ${form.level}).
 
 Rules:
 - Ask ONE question at a time
 - After each answer, give 1–2 sentence feedback (honest but encouraging), then ask next question  
-- Mix technical and HR questions relevant to ${form.dept} and ${form.role}
-- After exactly ${form.rounds} questions and their answers, write "INTERVIEW_COMPLETE" on its own line, then give a detailed performance review with score /10 per category (Communication, Technical, Confidence, Overall)
+- ${focusPrompt}
+- After exactly ${form.rounds} questions and their answers, write "INTERVIEW_COMPLETE" on its own line, then give a detailed performance review with score /10 per category (Communication, Technical, Confidence, Overall). If pacing/filler word metrics are provided in [System Diagnostics], incorporate them into the Communication/Confidence feedback and penalize appropriately.
 
 Format: feedback on answer (if any), then next question. Keep it professional and natural.`
 
@@ -488,10 +497,20 @@ Format: feedback on answer (if any), then next question. Keep it professional an
   async function send() {
     if (!input.trim() || loading) return
     const ans = input.trim(); setInput('')
-    const newMsgs = [...messages, { role: 'user', content: ans }]
+    
+    let hiddenMeta = ''
+    if (voiceStats.totalMs > 0) {
+       const minutes = voiceStats.totalMs / 60000
+       const words = ans.split(/\s+/).length
+       const wpm = Math.round(words / minutes)
+       hiddenMeta = `\n[System Diagnostics: The candidate spoke at ${wpm} WPM (ideal 130-160) and used ${voiceStats.fillerCount} filler words. Factor this pacing and filler usage strictly into their feedback & Confidence/Communication scores.]`
+    }
+    setVoiceStats({ totalMs: 0, fillerCount: 0 })
+
+    const newMsgs = [...messages, { role: 'user', content: ans, hiddenMeta }]
     setMessages(newMsgs); setLoading(true)
     try {
-      const r = await callClaude(newMsgs.map(m => ({ role: m.role, content: m.content })), sys)
+      const r = await callClaude(newMsgs.map(m => ({ role: m.role, content: m.content + (m.hiddenMeta || '') })), sys)
       if (r.includes('INTERVIEW_COMPLETE')) {
         const [before, after] = r.split('INTERVIEW_COMPLETE')
         setMessages(prev => [...prev, { role: 'assistant', content: before.trim() }])
@@ -532,16 +551,21 @@ Format: feedback on answer (if any), then next question. Keep it professional an
           <SelectField label="Company *" value={form.company} onChange={v => setForm(f => ({ ...f, company: v }))} options={COMPANIES} placeholder="Select" />
           <SelectField label="Branch *" value={form.dept} onChange={v => setForm(f => ({ ...f, dept: v, role: '' }))} options={DEPARTMENTS} placeholder="Select" />
           <SelectField label="Role *" value={form.role} onChange={v => setForm(f => ({ ...f, role: v }))} options={ROLES[form.dept] || []} placeholder={form.dept ? 'Select role' : 'Pick branch first'} />
-          <SelectField label="Level" value={form.level} onChange={v => setForm(f => ({ ...f, level: v }))} options={LEVELS} />
+          <SelectField label="Interview Focus" value={form.focus} onChange={v => setForm(f => ({ ...f, focus: v }))} options={FOCUS_TYPES} />
         </div>
-        <div style={{ marginBottom: 22 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 8 }}>Number of Questions</label>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 22 }}>
+          <div style={{ flex: 1 }}>
+            <SelectField label="Level" value={form.level} onChange={v => setForm(f => ({ ...f, level: v }))} options={LEVELS} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Questions</label>
           <div style={{ display: 'flex', gap: 8 }}>
             {[5, 7, 10].map(n => (
               <button key={n} onClick={() => setForm(f => ({ ...f, rounds: n }))} style={{ padding: '8px 20px', borderRadius: 999, border: '1.5px solid', borderColor: form.rounds === n ? 'var(--purple-primary)' : 'var(--card-border)', background: form.rounds === n ? 'var(--purple-xsoft)' : '#fff', color: form.rounds === n ? 'var(--purple-primary)' : 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
                 {n} Q
               </button>
             ))}
+          </div>
           </div>
         </div>
         <Btn onClick={start} disabled={!form.company || !form.dept || !form.role} loading={loading}>🎙️ Start Interview</Btn>
@@ -570,7 +594,7 @@ Format: feedback on answer (if any), then next question. Keep it professional an
   )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 180px)', minHeight: 520 }}>
+    <div className="responsive-chat-height">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexShrink: 0 }}>
         <div style={{ width: 10, height: 10, borderRadius: 999, background: '#22c55e', boxShadow: '0 0 0 3px #dcfce7' }} />
         <span style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>Live — {form.company} · {form.role}</span>
@@ -653,7 +677,7 @@ Format: feedback on answer (if any), then next question. Keep it professional an
 // ══════════════════════════════════════════════════════════════════
 function ScoredMock({ onBack }) {
   const [stage, setStage] = useState('setup')
-  const [form, setForm] = useState({ company: '', dept: '', role: '', level: 'Fresher (0 exp)' })
+  const [form, setForm] = useState({ company: '', dept: '', role: '', level: 'Fresher (0 exp)', focus: 'Technical & HR (Mixed)' })
   const [questions, setQuestions] = useState([])
   const [answers, setAnswers] = useState({})
   const [loadingQ, setLoadingQ] = useState(false)
@@ -664,9 +688,14 @@ function ScoredMock({ onBack }) {
   async function loadQuestions() {
     setLoadingQ(true); setStage('test'); setQuestions([]); setAnswers({})
     try {
+      const focusPrompt = 
+        form.focus === 'HR & Behavioral Only' ? 'Generate 8 behavioral/HR questions focusing on the STAR method, leadership, challenges, and teamwork.' :
+        form.focus === 'Technical Core Only' ? 'Generate 8 deep technical questions, architecture queries, and coding theory.' :
+        'Mix: 3 technical questions, 2 HR/behavioral, 2 situational, 1 company-specific.';
+
       const prompt = `Generate exactly 8 interview questions for a ${form.level} candidate applying to ${form.company} for the role of ${form.role} (${form.dept} branch).
 
-Mix: 3 technical questions, 2 HR/behavioral, 2 situational, 1 company-specific.
+${focusPrompt}
 
 Return ONLY a JSON array of 8 strings like:
 ["Question 1?", "Question 2?", ..., "Question 8?"]
@@ -741,6 +770,7 @@ Give a detailed evaluation:
           <SelectField label="Company *" value={form.company} onChange={v => setForm(f => ({ ...f, company: v }))} options={COMPANIES} placeholder="Select" />
           <SelectField label="Branch *" value={form.dept} onChange={v => setForm(f => ({ ...f, dept: v, role: '' }))} options={DEPARTMENTS} placeholder="Select" />
           <SelectField label="Role *" value={form.role} onChange={v => setForm(f => ({ ...f, role: v }))} options={ROLES[form.dept] || []} placeholder={form.dept ? 'Select role' : 'Pick branch first'} />
+          <SelectField label="Interview Focus" value={form.focus} onChange={v => setForm(f => ({ ...f, focus: v }))} options={FOCUS_TYPES} />
           <SelectField label="Level" value={form.level} onChange={v => setForm(f => ({ ...f, level: v }))} options={LEVELS} />
         </div>
         <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px', marginBottom: 22, fontSize: 13, color: '#166534' }}>

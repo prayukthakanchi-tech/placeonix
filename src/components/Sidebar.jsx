@@ -13,27 +13,28 @@ import {
   Shield,
   UserRound,
   X,
+  Sparkles,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 
-const ADMIN_EMAILS = ['admin@placeonix.com', 'prayukthakanchi@gmail.com']
+// Admin status is derived from Firestore profile.role — never from a client-side email list.
 
 const navItems = [
   { icon: Home,      label: 'Dashboard',      id: 'dashboard' },
   { icon: BookOpen,  label: 'Placement Hub',   id: 'resources' },
   { icon: Brain,     label: 'Aptitude',        id: 'aptitude' },
   { icon: Code2,     label: 'Coding Practice', id: 'coding' },
+  { icon: Sparkles,  label: 'Online Compiler', id: 'compiler' },
   { icon: Bot,       label: 'AI Interview',    id: 'interview' },
   { icon: FileText,  label: 'Resume & ATS',    id: 'resume' },
-  { icon: BarChart3, label: 'Analytics',       id: 'analytics' },
   { icon: UserRound, label: 'Profile',         id: 'profile' },
   { icon: Settings,  label: 'Settings',        id: 'settings' },
 ]
 
 export default function Sidebar({ activePage, setActivePage, mobileOpen, onMobileClose }) {
   const { user, profile, logout } = useAuth()
-  const readiness = profile?.placementReadiness ?? 78
-  const isAdmin = user && ADMIN_EMAILS.includes(user.email)
+  const readiness = profile?.placementReadiness ?? 0
+  const isAdmin = profile?.role === 'admin'
 
   const visibleNavItems = [...navItems]
   if (isAdmin) {
@@ -53,8 +54,11 @@ export default function Sidebar({ activePage, setActivePage, mobileOpen, onMobil
       )}
       <aside className={`sidebar${mobileOpen ? ' sidebar-mobile-open' : ''}`}>
         <div className="sidebar-logo">
-          <div className="rocket">P</div>
-          <span className="sidebar-logo-text">Placeonix</span>
+          <div className="sidebar-brand-icon" style={{ fontSize: 22, width: 40, height: 40 }}>
+            <Sparkles className="sidebar-brand-spark" size={16} fill="currentColor" />
+            P
+          </div>
+          <span className="sidebar-logo-text" style={{ fontSize: 22, fontWeight: 900, fontFamily: 'Urbanist, sans-serif', letterSpacing: -0.5 }}>Placeonix</span>
           {/* Mobile close button */}
           <button className="sidebar-close-btn" onClick={onMobileClose} aria-label="Close menu">
             <X size={18} />

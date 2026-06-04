@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react'
-import { collection, query, onSnapshot, updateDoc, doc, increment, addDoc, getDocs, deleteDoc, serverTimestamp } from 'firebase/firestore'
-import { db } from '../firebase/config'
 import { useAuth } from '../context/AuthContext.jsx'
 import { 
   Search, 
@@ -19,6 +17,8 @@ import {
   CheckCircle2
 } from 'lucide-react'
 import { PLACEMENT_PREP_DATA } from '../data/placementPrepData'
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore'
+import { db } from '../firebase/config'
 
 
 const DEPARTMENTS = [
@@ -247,94 +247,42 @@ export default function Resources() {
   const [resources, setResources] = useState(() => 
     SEED_DATA.map((item, idx) => ({ id: `local-${idx}`, clicks: 0, ...item }))
   )
-  const [selectedDept, setSelectedDept] = useState('CSE')
+  const [dbResources, setDbResources] = useState([])
+  const [selectedDept, setSelectedDept] = useState(null) // null = waiting for profile to load
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState('resources') // 'resources' | 'syllabus'
   const [expandedQuestions, setExpandedQuestions] = useState({})
 
 
-  // Initialize to user branch if available
+  // Initialize to user's department once profile loads
   useEffect(() => {
-    if (profile?.branch) {
+    if (profile?.branch && !selectedDept) {
       setSelectedDept(profile.branch)
+    } else if (!profile && !selectedDept) {
+      // If no profile yet, default to CSE so the page isn't empty
+      const timer = setTimeout(() => setSelectedDept(prev => prev ?? 'CSE'), 1500)
+      return () => clearTimeout(timer)
     }
-  }, [profile])
+  }, [profile, selectedDept])
 
-  // Sync resources from database & auto-migrate/seed
+
+  // Fetch dynamic resources from admin
   useEffect(() => {
-    let active = true
-    let unsubscribe = null
-
-    async function checkAndSeed() {
-      try {
-        const querySnapshot = await getDocs(collection(db, 'resources'))
-        const list = []
-        querySnapshot.forEach((doc) => {
-          list.push(doc.data())
-        })
-
-        if (list.length > 0) {
-          const hasEmbeddedSystems = list.some(res => res.subject === 'Embedded Systems')
-          if (!hasEmbeddedSystems) {
-            console.log("Firestore resources outdated. Upgrading database...")
-            // Clean existing unmatching resources to prevent duplicates
-            for (const docSnap of querySnapshot.docs) {
-              await deleteDoc(doc(db, 'resources', docSnap.id))
-            }
-            
-            for (const item of SEED_DATA) {
-              await addDoc(collection(db, 'resources'), {
-                ...item,
-                submittedBy: 'System Curator',
-                status: 'approved',
-                clicks: 0,
-                createdAt: serverTimestamp()
-              })
-            }
-            console.log("Database update & seeding completed.")
-          }
-        }
-      } catch (e) {
-        console.error("Database migration check failed or quota exceeded:", e)
-      }
-    }
-
-    checkAndSeed().then(() => {
-      if (!active) return
-      const q = collection(db, 'resources')
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        const list = []
-        snapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() })
-        })
-        if (active && list.length > 0) {
-          setResources(list)
-        }
-      }, (err) => {
-        console.error("Snapshot read error or quota exceeded:", err)
-      })
+    const q = query(collection(db, 'resources'), orderBy('createdAt', 'desc'))
+    const unsub = onSnapshot(q, snap => {
+      setDbResources(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     })
-
-    return () => {
-      active = false
-      if (unsubscribe) unsubscribe()
-    }
+    return unsub
   }, [])
 
-  // Dynamic increment tracker
+  // Open resource in new tab
   function handleResourceClick(id, url) {
-    if (id && !id.startsWith('local-')) {
-      try {
-        updateDoc(doc(db, 'resources', id), {
-          clicks: increment(1)
-        }).catch(() => {})
-      } catch (e) {}
-    }
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 
-  // Unified filtering logic
-  const filtered = resources.filter(res => {
+  // Unified filtering logic (combine local and admin db resources)
+  const allResources = [...dbResources, ...resources]
+  const filtered = allResources.filter(res => {
     // Search filter
     const matchesSearch = !searchQuery || 
       res.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
