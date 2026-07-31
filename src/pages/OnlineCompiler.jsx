@@ -183,15 +183,21 @@ Return ONLY a JSON object: {"success": true, "output": "<stdout string>"}. No ma
   }
 }
 
-async function runCode(sourceCode, languageId, stdin = '', retries = 3) {
+async function runCode(sourceCode, languageId, stdin = '', retries = 2) {
   const langConfig = WANDBOX_LANGS[languageId]
   if (!langConfig) return { success: false, output: 'Language not supported', type: 'Error' }
 
+  const MAX_OUTPUT_LEN = 10000
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
       const res = await fetch('https://wandbox.org/api/compile.json', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           compiler: langConfig.compiler,
           code: sourceCode,
@@ -199,35 +205,48 @@ async function runCode(sourceCode, languageId, stdin = '', retries = 3) {
         }),
       })
 
-      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      clearTimeout(timeoutId)
+
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`)
       const data = await res.json()
 
       if (data.compiler_error || (data.status != 0 && !data.program_message)) {
-        const compileOut = (data.compiler_error || data.compiler_message || 'Compile error').trim()
+        let compileOut = (data.compiler_error || data.compiler_message || 'Compile error').trim()
         if (compileOut.includes('Resource temporarily unavailable') || compileOut.includes('crun: clone')) {
           return await runCodeAI(sourceCode, languageId, stdin)
+        }
+        if (compileOut.length > MAX_OUTPUT_LEN) {
+          compileOut = compileOut.substring(0, MAX_OUTPUT_LEN) + '\n... [Output truncated: exceeded 10,000 characters]'
         }
         if (compileOut) return { success: false, output: compileOut, type: 'Compile Error' }
       }
 
-      const stdout = (data.program_output || '').trim()
-      const stderr = (data.program_error || '').trim()
+      let stdout = (data.program_output || '').trim()
+      let stderr = (data.program_error || '').trim()
 
       if (stderr.includes('Resource temporarily unavailable')) {
         return await runCodeAI(sourceCode, languageId, stdin)
       }
 
       if (data.status != 0 && stderr) {
+        if (stderr.length > MAX_OUTPUT_LEN) {
+          stderr = stderr.substring(0, MAX_OUTPUT_LEN) + '\n... [Output truncated]'
+        }
         return { success: false, output: stderr, type: 'Runtime Error' }
+      }
+
+      let finalOutput = stdout || stderr || '(no output)'
+      if (finalOutput.length > MAX_OUTPUT_LEN) {
+        finalOutput = finalOutput.substring(0, MAX_OUTPUT_LEN) + '\n... [Output truncated: exceeded 10,000 characters]'
       }
 
       return {
         success: true,
-        output: stdout || stderr || '(no output)',
+        output: finalOutput,
       }
     } catch (err) {
       if (attempt < retries) {
-        await new Promise(r => setTimeout(r, 800))
+        await new Promise(r => setTimeout(r, 600))
         continue
       }
       return await runCodeAI(sourceCode, languageId, stdin)
