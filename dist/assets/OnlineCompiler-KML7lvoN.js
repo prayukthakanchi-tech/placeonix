@@ -1,9 +1,12 @@
-import{j as t}from"./index-DWBUXvfZ.js";import{a1 as s}from"./icons-Duf8sykG.js";import"./react-vendor-ehwJnh3_.js";import"./firebase-vendor-CQT6tCi3.js";const q=[{id:71,name:"Python",ext:"py",color:"#3b82f6",icon:"🐍"},{id:62,name:"Java",ext:"java",color:"#f97316",icon:"☕"},{id:54,name:"C++",ext:"cpp",color:"#8b5cf6",icon:"🔷"},{id:63,name:"JavaScript",ext:"js",color:"#eab308",icon:"🟨"},{id:50,name:"C",ext:"c",color:"#6b7280",icon:"⚙️"}],de={71:{compiler:"cpython-3.13.8"},62:{compiler:"openjdk-jdk-22+36"},54:{compiler:"gcc-13.2.0"},63:{compiler:"nodejs-20.17.0"},50:{compiler:"gcc-13.2.0-c"}},Q={71:`num1 = int(input())
-num2 = int(input())
+import{j as t}from"./index-CAJJw5Sj.js";import{a1 as s}from"./icons-Duf8sykG.js";import"./react-vendor-ehwJnh3_.js";import"./firebase-vendor-CQT6tCi3.js";const q=[{id:71,name:"Python",ext:"py",color:"#3b82f6",icon:"🐍"},{id:62,name:"Java",ext:"java",color:"#f97316",icon:"☕"},{id:54,name:"C++",ext:"cpp",color:"#8b5cf6",icon:"🔷"},{id:63,name:"JavaScript",ext:"js",color:"#eab308",icon:"🟨"},{id:50,name:"C",ext:"c",color:"#6b7280",icon:"⚙️"}],de={71:{compiler:"cpython-3.13.8"},62:{compiler:"openjdk-jdk-22+36"},54:{compiler:"gcc-13.2.0"},63:{compiler:"nodejs-20.17.0"},50:{compiler:"gcc-13.2.0-c"}},Q={71:`import sys
 
-sum = num1 + num2
-
-print(sum)`,62:`import java.util.Scanner;
+tokens = sys.stdin.read().split()
+if len(tokens) >= 2:
+    num1 = int(tokens[0])
+    num2 = int(tokens[1])
+    print(num1 + num2)
+else:
+    print(0)`,62:`import java.util.Scanner;
 
 public class Main {
     public static void main(String[] args) {

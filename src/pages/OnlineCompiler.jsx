@@ -17,12 +17,15 @@ const WANDBOX_LANGS = {
 }
 
 const DEFAULT_CODE = {
-  71: `num1 = int(input())
-num2 = int(input())
+  71: `import sys
 
-sum = num1 + num2
-
-print(sum)`,
+tokens = sys.stdin.read().split()
+if len(tokens) >= 2:
+    num1 = int(tokens[0])
+    num2 = int(tokens[1])
+    print(num1 + num2)
+else:
+    print(0)`,
   62: `import java.util.Scanner;
 
 public class Main {
