@@ -1,22 +1,12 @@
 import React, { useEffect, useState } from 'react'
-import { CheckCircle2, Copy, ExternalLink, Globe, Mail, Save, UserRound } from 'lucide-react'
+import { CheckCircle2, Mail, Save, UserRound } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
-import { doc, updateDoc } from 'firebase/firestore'
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
+import { BADGES } from '../utils/badges.js'
 
 const departments = ['ECE', 'CSE', 'EEE', 'IT', 'ME', 'CIVIL', 'AERO', 'BME', 'BT']
 
-// ── Generate a URL-safe portfolio ID from name + uid ──────────────
-function makePortfolioId(name, uid) {
-  const slug = (name || 'student')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-  return `${slug}-${uid.slice(0, 6)}`
-}
-
-const SITE_URL = 'https://placeonix-theta.vercel.app'
 
 export default function Profile() {
   const { user, profile, updateUserProfile } = useAuth()
@@ -27,18 +17,85 @@ export default function Profile() {
   const [message, setMessage]       = useState('')
   const [error, setError]           = useState('')
 
-  // portfolio state
-  const [portfolioEnabled, setPortfolioEnabled] = useState(false)
-  const [portfolioId, setPortfolioId]           = useState('')
-  const [toggling, setToggling]                 = useState(false)
-  const [copied, setCopied]                     = useState(false)
+  // Review / Feedback states
+  const [rating, setRating] = useState(0)
+  const [selectedTags, setSelectedTags] = useState([])
+  const [reviewText, setReviewText] = useState('')
+  const [loadingReview, setLoadingReview] = useState(true)
+  const [hasExistingReview, setHasExistingReview] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [submittingReview, setSubmittingReview] = useState(false)
+  const [reviewMessage, setReviewMessage] = useState('')
+
+  useEffect(() => {
+    if (!user) return
+    async function fetchReview() {
+      try {
+        const reviewRef = doc(db, 'feedback', user.uid)
+        const docSnap = await getDoc(reviewRef)
+        if (docSnap.exists()) {
+          const data = docSnap.data()
+          setRating(data.rating || 0)
+          setSelectedTags(data.tags || [])
+          setReviewText(data.content || '')
+          setHasExistingReview(true)
+        }
+      } catch (err) {
+        console.error('Error fetching review:', err)
+      } finally {
+        setLoadingReview(false)
+      }
+    }
+    fetchReview()
+  }, [user])
+
+  async function handleReviewSubmit() {
+    if (!user || rating === 0) return
+    setSubmittingReview(true)
+    setReviewMessage('')
+    try {
+      await setDoc(doc(db, 'feedback', user.uid), {
+        uid: user.uid,
+        name: profile?.name || user?.email?.split('@')[0] || 'Anonymous',
+        email: user.email,
+        branch: profile?.branch || 'ECE',
+        rating,
+        tags: selectedTags,
+        content: reviewText.trim(),
+        createdAt: serverTimestamp(),
+      })
+      setHasExistingReview(true)
+      setIsEditing(false)
+      setReviewMessage('Thank you! Your review has been saved.')
+      setTimeout(() => setReviewMessage(''), 4000)
+    } catch (err) {
+      console.error('Error saving review:', err)
+      alert('Could not submit review: ' + err.message)
+    }
+    setSubmittingReview(false)
+  }
+
+  const RATING_LABELS = {
+    1: 'Hated it',
+    2: 'Disliked it',
+    3: "It's okay",
+    4: 'Liked it',
+    5: 'Loved it!'
+  }
+
+  function getPlaceholder(r) {
+    if (r <= 2) return 'What went wrong? We would love to know how we can improve your experience...'
+    if (r === 3) return 'How can we make Placeonix better? We are listening...'
+    return 'Awesome! What did you love most about the platform? Any small suggestions?'
+  }
+
+  const reviewChips = ['💻 Coding IDE', '🧠 Aptitude Prep', '🎙️ AI Interviews', '📄 Resume Services', '🎨 UI Design']
+
 
   useEffect(() => {
     setName(profile?.name || '')
     setBranch(profile?.branch || 'ECE')
     setCareerGoal(profile?.careerGoal || 'Embedded Engineer')
-    setPortfolioEnabled(profile?.portfolioEnabled || false)
-    setPortfolioId(profile?.portfolioId || '')
   }, [profile])
 
   async function handleSubmit(event) {
@@ -61,39 +118,6 @@ export default function Profile() {
     }
   }
 
-  async function togglePortfolio() {
-    if (!user) return
-    setToggling(true)
-    try {
-      const newEnabled = !portfolioEnabled
-      let pid = portfolioId
-
-      // Generate a portfolio ID the first time they enable it
-      if (newEnabled && !pid) {
-        pid = makePortfolioId(name || profile?.name || 'student', user.uid)
-        setPortfolioId(pid)
-      }
-
-      await updateDoc(doc(db, 'users', user.uid), {
-        portfolioEnabled: newEnabled,
-        portfolioId: pid,
-      })
-      setPortfolioEnabled(newEnabled)
-    } catch (e) {
-      alert('Failed to update portfolio settings. Please try again.')
-    }
-    setToggling(false)
-  }
-
-  function copyLink() {
-    const link = `${SITE_URL}/?portfolio=${portfolioId}`
-    navigator.clipboard.writeText(link).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }
-
-  const portfolioLink = portfolioId ? `${SITE_URL}/?portfolio=${portfolioId}` : ''
 
   return (
     <div className="profile-page">
@@ -153,6 +177,226 @@ export default function Profile() {
           </form>
         </section>
 
+        {/* Play Store-style Review Section */}
+        <section className="profile-card card" style={{ marginTop: 20 }}>
+          <h2>
+            <span style={{ fontSize: 20 }}>💬</span>
+            Rate Placeonix
+          </h2>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 15 }}>
+            How is your preparation experience so far?
+          </p>
+
+          {/* 5-Star Row */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, margin: '15px 0 5px' }}>
+            {[1, 2, 3, 4, 5].map((num) => (
+              <button
+                key={num}
+                type="button"
+                onClick={() => {
+                  if (isEditing || !hasExistingReview) {
+                    setRating(num)
+                  }
+                }}
+                disabled={hasExistingReview && !isEditing}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 32,
+                  cursor: (hasExistingReview && !isEditing) ? 'default' : 'pointer',
+                  color: num <= rating ? '#f59e0b' : '#d1d5db',
+                  transition: 'transform 0.15s, color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  if (!hasExistingReview || isEditing) {
+                    e.currentTarget.style.transform = 'scale(1.2)'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!hasExistingReview || isEditing) {
+                    e.currentTarget.style.transform = 'scale(1)'
+                  }
+                }}
+              >
+                ★
+              </button>
+            ))}
+          </div>
+
+          {rating > 0 && (
+            <div style={{
+              textAlign: 'center',
+              fontSize: 13,
+              fontWeight: 800,
+              color: '#f59e0b',
+              marginBottom: 15
+            }} >
+              {RATING_LABELS[rating]}
+            </div>
+          )}
+
+          {/* Tag Chips */}
+          <div style={{ marginBottom: 15 }}>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 8 }}>
+              Select what you are reviewing:
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {reviewChips.map((chip) => {
+                const isSelected = selectedTags.includes(chip)
+                return (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => {
+                      if (hasExistingReview && !isEditing) return
+                      if (isSelected) {
+                        setSelectedTags(selectedTags.filter(t => t !== chip))
+                      } else {
+                        setSelectedTags([...selectedTags, chip])
+                      }
+                    }}
+                    disabled={hasExistingReview && !isEditing}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 20,
+                      border: '1.5px solid',
+                      borderColor: isSelected ? 'var(--purple-primary)' : 'var(--card-border)',
+                      background: isSelected ? 'var(--purple-xsoft)' : 'var(--main-bg)',
+                      color: isSelected ? 'var(--purple-primary)' : 'var(--text-secondary)',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: (hasExistingReview && !isEditing) ? 'default' : 'pointer',
+                      fontFamily: 'inherit',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {chip}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Review text */}
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>
+              Tell us more (optional):
+            </label>
+            <textarea
+              value={reviewText}
+              onChange={(e) => setReviewText(e.target.value)}
+              disabled={hasExistingReview && !isEditing}
+              placeholder={getPlaceholder(rating)}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1.5px solid var(--card-border)',
+                borderRadius: 10,
+                fontSize: 13,
+                fontFamily: 'inherit',
+                outline: 'none',
+                boxSizing: 'border-box',
+                height: 80,
+                resize: 'vertical',
+                background: 'var(--main-bg)',
+                color: 'var(--text-primary)',
+              }}
+            />
+          </div>
+
+          {reviewMessage && (
+            <div style={{
+              marginBottom: 15,
+              padding: '10px 12px',
+              background: '#f0fdf4',
+              border: '1px solid #86efac',
+              color: '#16a34a',
+              borderRadius: 8,
+              fontSize: 12.5,
+              fontWeight: 700
+            }}>
+              {reviewMessage}
+            </div>
+          )}
+
+          {/* Submit/Edit Buttons */}
+          {hasExistingReview && !isEditing ? (
+            <button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              style={{
+                width: '100%',
+                padding: 12,
+                background: 'var(--purple-xsoft)',
+                border: '1.5px solid var(--purple-soft)',
+                color: 'var(--purple-primary)',
+                borderRadius: 10,
+                fontSize: 13.5,
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'all 0.2s',
+              }}
+            >
+              ✏️ Edit Review
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: 10 }}>
+              {isEditing && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditing(false)
+                    if (user) {
+                      getDoc(doc(db, 'feedback', user.uid)).then(snap => {
+                        if (snap.exists()) {
+                          const data = snap.data()
+                          setRating(data.rating || 0)
+                          setSelectedTags(data.tags || [])
+                          setReviewText(data.content || '')
+                        }
+                      })
+                    }
+                  }}
+                  style={{
+                    padding: '12px 20px',
+                    background: '#f3f4f6',
+                    border: 'none',
+                    color: '#374151',
+                    borderRadius: 10,
+                    fontSize: 13.5,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleReviewSubmit}
+                disabled={submittingReview || rating === 0}
+                style={{
+                  flex: 1,
+                  padding: 12,
+                  background: rating === 0 ? '#e5e7eb' : 'linear-gradient(135deg, #6c3ce1, #7c3aed)',
+                  color: rating === 0 ? '#9ca3af' : '#fff',
+                  border: 'none',
+                  borderRadius: 10,
+                  fontSize: 13.5,
+                  fontWeight: 700,
+                  cursor: rating === 0 ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit',
+                  transition: 'all 0.2s',
+                }}
+              >
+                {submittingReview ? 'Submitting...' : isEditing ? 'Update Review' : 'Submit Review'}
+              </button>
+            </div>
+          )}
+        </section>
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <section className="profile-card card">
             <h2>
@@ -185,103 +429,65 @@ export default function Profile() {
             </div>
           </section>
 
-          {/* ── Public Portfolio Card ── */}
-          <section className="profile-card card">
-            <h2>
-              <Globe size={21} aria-hidden="true" />
-              Public Portfolio
-            </h2>
 
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 18 }}>
-              Share a beautiful public page showing your Placement Readiness, Skill Scores, and Aptitude — no login needed for recruiters.
+
+          {/* ── Achievements Hub Card ── */}
+          <section className="profile-card card" style={{ padding: '24px 28px' }}>
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16.5, fontWeight: 900, color: 'var(--text-primary)', borderBottom: '1.5px solid var(--card-border)', paddingBottom: 12, marginBottom: 14 }}>
+              <span style={{ fontSize: 20 }}>🏆</span>
+              Achievements & Badges
+            </h2>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: 18 }}>
+              Complete placement preparation milestones to unlock badges. Your active badges display next to your rank on the Leaderboard.
             </p>
 
-            {/* Toggle */}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '14px 16px',
-              background: portfolioEnabled ? '#f0fdf4' : 'var(--main-bg)',
-              border: `1.5px solid ${portfolioEnabled ? '#86efac' : 'var(--card-border)'}`,
-              borderRadius: 12, marginBottom: 16,
-            }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {portfolioEnabled ? '✅ Portfolio is Public' : '🔒 Portfolio is Private'}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                  {portfolioEnabled ? 'Anyone with the link can view your portfolio.' : 'Enable to generate a shareable link.'}
-                </div>
-              </div>
-              <button
-                onClick={togglePortfolio}
-                disabled={toggling}
-                style={{
-                  width: 44, height: 24, borderRadius: 999, border: 'none',
-                  cursor: toggling ? 'not-allowed' : 'pointer',
-                  background: portfolioEnabled ? '#22c55e' : '#d1d5db',
-                  position: 'relative', transition: 'background 0.2s', flexShrink: 0,
-                }}
-              >
-                <div style={{
-                  position: 'absolute', top: 3,
-                  left: portfolioEnabled ? 23 : 3,
-                  width: 18, height: 18, borderRadius: '50%',
-                  background: '#fff',
-                  transition: 'left 0.2s',
-                  boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
-                }} />
-              </button>
-            </div>
-
-            {/* Link area */}
-            {portfolioEnabled && portfolioLink && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  background: 'var(--main-bg)', border: '1.5px solid var(--card-border)',
-                  borderRadius: 10, padding: '10px 12px', overflow: 'hidden',
-                }}>
-                  <span style={{
-                    fontSize: 12, color: 'var(--purple-primary)', fontWeight: 600,
-                    flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 10 }}>
+              {BADGES.map(badge => {
+                const isUnlocked = profile?.unlockedBadges?.includes(badge.id) || false
+                return (
+                  <div key={badge.id} style={{
+                    padding: '14px 10px', borderRadius: 16, border: '1.5px solid',
+                    borderColor: isUnlocked ? 'var(--purple-soft)' : 'var(--card-border)',
+                    background: isUnlocked ? 'var(--purple-xsoft)' : '#fafafa',
+                    textAlign: 'center', display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', transition: 'all 0.2s', position: 'relative',
+                    cursor: 'default', filter: isUnlocked ? 'none' : 'grayscale(100%) opacity(55%)'
+                  }}
+                  title={badge.desc}
+                  onMouseEnter={e => {
+                    if (isUnlocked) {
+                      e.currentTarget.style.borderColor = 'var(--purple-primary)'
+                      e.currentTarget.style.transform = 'translateY(-2px)'
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (isUnlocked) {
+                      e.currentTarget.style.borderColor = 'var(--purple-soft)'
+                      e.currentTarget.style.transform = 'translateY(0)'
+                    }
                   }}>
-                    {portfolioLink}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={copyLink}
-                    style={{
-                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      gap: 6, padding: '10px', borderRadius: 10,
-                      background: copied ? '#f0fdf4' : 'var(--purple-xsoft)',
-                      border: `1.5px solid ${copied ? '#86efac' : 'var(--purple-soft)'}`,
-                      color: copied ? '#16a34a' : 'var(--purple-primary)',
-                      fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    <Copy size={14} />
-                    {copied ? 'Copied!' : 'Copy Link'}
-                  </button>
-                  <a
-                    href={portfolioLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      gap: 6, padding: '10px', borderRadius: 10,
-                      background: 'var(--purple-primary)', color: '#fff',
-                      fontWeight: 700, fontSize: 13, textDecoration: 'none',
-                      transition: 'opacity 0.2s',
-                    }}
-                  >
-                    <ExternalLink size={14} />
-                    Preview
-                  </a>
-                </div>
-              </div>
-            )}
+                    {/* Badge Emoji */}
+                    <div style={{
+                      fontSize: 26, width: 44, height: 44, borderRadius: '50%',
+                      background: isUnlocked ? '#fff' : '#e5e7eb',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      marginBottom: 8, border: isUnlocked ? '1.5px solid var(--purple-soft)' : 'none',
+                      boxShadow: isUnlocked ? '0 4px 10px rgba(108,60,225,0.1)' : 'none'
+                    }}>
+                      {badge.emoji}
+                    </div>
+                    
+                    {/* Badge name */}
+                    <span style={{ fontSize: 11.5, fontWeight: 800, color: isUnlocked ? 'var(--purple-primary)' : 'var(--text-muted)' }}>
+                      {badge.name}
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4, display: 'block', lineHeight: 1.3 }}>
+                      {isUnlocked ? '✓ Unlocked' : 'Locked'}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
           </section>
         </div>
       </div>

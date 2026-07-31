@@ -1293,6 +1293,42 @@ const WANDBOX_LANGS = {
   50: { compiler: 'gcc-13.2.0-c' },
 }
 
+// ── AI fallback: simulate execution via Gemini ────────────────
+async function runCodeAI(sourceCode, languageId) {
+  const langNames = { 71: 'Python 3', 62: 'Java', 54: 'C++', 63: 'JavaScript', 50: 'C' }
+  const langName = langNames[languageId] || 'unknown language'
+  const prompt = `You are a secure, sandboxed code interpreter. Execute the following ${langName} code and respond ONLY with a JSON object in this exact format: {"success":true,"output":"<stdout>","type":"stdout"} or {"success":false,"output":"<error message>","type":"Runtime Error"}. Do not include markdown, explanation, or any text outside the JSON object.\n\nCode:\n${sourceCode}`
+  try {
+    // Try server proxy first
+    const proxyRes = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: prompt }),
+    })
+    if (proxyRes.ok) {
+      const d = await proxyRes.json()
+      const raw = (d.response || d.candidates?.[0]?.content?.parts?.[0]?.text || d.reply || d.message || '').trim()
+      const jsonStr = raw.replace(/^```json\s*/,'').replace(/```\s*$/,'').trim()
+      return JSON.parse(jsonStr)
+    }
+  } catch (_) {}
+
+  // Instant local JS execution fallback for JavaScript (Language ID 63)
+  if (languageId === 63) {
+    try {
+      const logs = []
+      const customConsole = { log: (...args) => logs.push(args.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')) }
+      // eslint-disable-next-line no-new-func
+      new Function('console', sourceCode)(customConsole)
+      return { success: true, output: logs.join('\n') || '(no output)' }
+    } catch (jsErr) {
+      return { success: false, output: jsErr.message, type: 'Runtime Error' }
+    }
+  }
+
+  return { success: false, output: '⚠️ Compiler server is busy. Please try again in a moment.', type: 'Error' }
+}
+
 async function runCode(sourceCode, languageId, retries = 3) {
   const langConfig = WANDBOX_LANGS[languageId]
   if (!langConfig) return { success: false, output: 'Language not supported', type: 'Error' }
@@ -1342,13 +1378,12 @@ async function runCode(sourceCode, languageId, retries = 3) {
         await new Promise(r => setTimeout(r, 1200))
         continue
       }
-      return {
-        success: false,
-        output: `⚠️ Execution failed after ${retries} attempts: ${err.message}\n\nTip: JavaScript runs live in the browser without any API — try switching to JS.`,
-        type: 'Network Error',
-      }
+      // All retries exhausted — fall back to AI interpreter
+      return runCodeAI(sourceCode, languageId)
     }
   }
+  // Fallback if loop exits without returning
+  return runCodeAI(sourceCode, languageId)
 }
 
 // ── Subcomponents ─────────────────────────────────────────────────

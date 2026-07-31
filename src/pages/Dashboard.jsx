@@ -1,14 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ArrowRight,
-  BookOpen,
   Bot,
   Brain,
   BarChart3,
   Building2,
   Code2,
   Cpu,
-  FileText,
   Flame,
   Gauge,
   Laptop,
@@ -28,6 +26,8 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { doc, updateDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { computeReadiness } from '../utils/readiness.js'
+import { getUnlockedBadges } from '../utils/badges.js'
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip as RechartsTooltip } from 'recharts'
 
 // ── Dept label map ─────────────────────────────────────────────
 const DEPT_LABELS = {
@@ -55,14 +55,7 @@ const DEPTS = [
   { key: 'BT',    icon: Brain,       bg: '#f0fdf4', iconBg: '#d1fae5',  color: '#059669' },
 ]
 
-// ── Quick nav items ────────────────────────────────────────────
-const QUICK_NAV = [
-  { icon: BookOpen,  label: 'Placement Hub',   sub: 'Roadmaps & Q&As',   page: 'resources',  bg: '#ede9fe', iconBg: '#ddd6fe', color: '#6c3ce1' },
-  { icon: Brain,     label: 'Aptitude',        sub: 'Practice Tests',    page: 'aptitude',   bg: '#fce7f3', iconBg: '#fbcfe8', color: '#db2777' },
-  { icon: Bot,       label: 'AI Interview',    sub: 'Mock Rounds',       page: 'interview',  bg: '#fef3c7', iconBg: '#fde68a', color: '#d97706' },
-  { icon: Code2,     label: 'Coding',          sub: 'DSA + Compiler',    page: 'coding',     bg: '#dbeafe', iconBg: '#bfdbfe', color: '#2563eb' },
-  { icon: FileText,  label: 'Resume & ATS',    sub: 'ATS Score',         page: 'resume',     bg: '#dcfce7', iconBg: '#bbf7d0', color: '#16a34a' },
-]
+
 
 // ── Dept-specific skill pillars ────────────────────────────────
 // Each pillar maps to a REAL Firestore field or a derived value.
@@ -71,15 +64,15 @@ const QUICK_NAV = [
 // Pillar 3: Core Subjects→ streak-based proxy     (consistent daily study indicator)
 // Pillar 4: Interview    → profile.mockInterviewScore (written by AI Interview on complete)
 const DEPT_PILLARS = {
-  CSE:   ['Aptitude & Reasoning', 'Data Structures & Algorithms', 'Interview Readiness'],
-  IT:    ['Aptitude & Reasoning', 'Web Dev & SQL Coding',         'Interview Readiness'],
-  ECE:   ['Aptitude & Reasoning', 'C / Verilog / MATLAB',         'Interview Readiness'],
-  EEE:   ['Aptitude & Reasoning', 'MATLAB / C Scripting',         'Interview Readiness'],
-  ME:    ['Aptitude & Reasoning', 'CAD & Python Scripting',       'Interview Readiness'],
-  CIVIL: ['Aptitude & Reasoning', 'Excel / VBA Scripting',        'Interview Readiness'],
-  AERO:  ['Aptitude & Reasoning', 'MATLAB / Simulation Tools',    'Interview Readiness'],
-  BME:   ['Aptitude & Reasoning', 'Python / MATLAB',              'Interview Readiness'],
-  BT:    ['Aptitude & Reasoning', 'Bioinformatics & Python',      'Interview Readiness'],
+  CSE:   ['Aptitude & Reasoning', 'Data Structures & Algorithms'],
+  IT:    ['Aptitude & Reasoning', 'Web Dev & SQL Coding'],
+  ECE:   ['Aptitude & Reasoning', 'C / Verilog / MATLAB'],
+  EEE:   ['Aptitude & Reasoning', 'MATLAB / C Scripting'],
+  ME:    ['Aptitude & Reasoning', 'CAD & Python Scripting'],
+  CIVIL: ['Aptitude & Reasoning', 'Excel / VBA Scripting'],
+  AERO:  ['Aptitude & Reasoning', 'MATLAB / Simulation Tools'],
+  BME:   ['Aptitude & Reasoning', 'Python / MATLAB'],
+  BT:    ['Aptitude & Reasoning', 'Bioinformatics & Python'],
 }
 
 const PILLAR_COLORS = ['#6c3ce1', '#3b82f6', '#22c55e']
@@ -112,7 +105,7 @@ const DAILY_MESSAGES = {
     { title: 'Draw It, Don\'t Just Describe It', body: 'For any circuit or system you\'re revising today, draw the diagram from memory without looking. Hand-drawing a CMOS inverter or an op-amp configuration reinforces understanding far more than re-reading notes.' },
     { title: 'C and Verilog Are Your Technical Edge', body: 'Most ECE candidates know the theory. Fewer can write clean embedded C or basic Verilog. Even 20 minutes of syntax practice today gives you a meaningful edge in embedded and VLSI roles.' },
     { title: 'Communication Is the Final Circuit', body: 'No matter how strong your technical foundation, if you can\'t clearly explain your final year project — what problem it solves, what you built, what you\'d do differently — you\'ll lose interviews you should win.' },
-    { title: 'Master the Frequency Domain', body: 'Fourier series, Laplace transforms, and the z-transform are the language of signal processing. If these feel uncertain, spend time on them today. They connect every communication and control system concept.' },
+    { title: 'The Magic of Silicon & Signals', body: 'Every electronic device is a symphony of billions of microscopic switches working in absolute harmony. Ask yourself: how does a tiny piece of sand (silicon) route internet traffic or run AI? Deep dive into VLSI and signal processing, and marvel at the magic under the hood!' },
     { title: 'ISRO and Semiconductor Roles Demand Depth', body: 'ISRO, DRDO, and semiconductor companies reward candidates who genuinely care about engineering. Let your passion for electronics come through in your answers — not just your resume.' },
   ],
   EEE: [
@@ -172,12 +165,7 @@ const DAILY_MESSAGES = {
 }
 
 // ── Helpers ────────────────────────────────────────────────────
-function getGreeting() {
-  const h = new Date().getHours()
-  if (h < 12) return 'Good morning'
-  if (h < 17) return 'Good afternoon'
-  return 'Good evening'
-}
+
 
 function getISTDate(date) {
   const utc = date.getTime() + (date.getTimezoneOffset() * 60000)
@@ -237,6 +225,7 @@ export default function Dashboard({ setActivePage }) {
   const branch            = profile?.branch || 'CSE'
   const deptLabel         = DEPT_LABELS[branch] || branch
 
+
   const readiness         = profile?.placementReadiness ?? 0
   const aptitudeScore     = profile?.aptitudeScore     ?? 0   // written by Aptitude page
   const codingScore       = profile?.codingScore       ?? 0   // written by Coding page (future)
@@ -271,14 +260,50 @@ export default function Dashboard({ setActivePage }) {
         codingScore:        profile.codingScore       ?? 0,
       })
 
+      // Evaluate badge unlocks
+      const updatedProfileMock = {
+        ...profile,
+        currentStreak: newStreak
+      }
+      const prevBadges = profile?.unlockedBadges || []
+      const currentUnlocked = getUnlockedBadges(updatedProfileMock)
+      const newlyUnlocked = currentUnlocked.filter(b => !prevBadges.includes(b))
+      const finalUnlocked = [...prevBadges, ...newlyUnlocked]
+
+      if (newlyUnlocked.length > 0) {
+        window.dispatchEvent(new CustomEvent('placeonix-badge-unlocked', { detail: { badgeIds: newlyUnlocked } }))
+      }
+
       updateDoc(ref, {
         currentStreak:      newStreak,
         bestStreak:         Math.max(profile.bestStreak ?? 0, newStreak),
         lastVisited:        new Date(),
         placementReadiness: newReadiness,
+        unlockedBadges:      finalUnlocked
       }).catch(() => {})
     } catch (_) {}
   }, [user, profile])
+
+  // ── Practice reminder triggers ──────────────────────────────────
+  useEffect(() => {
+    if (!profile) return
+    const isPracticeReminderEnabled = profile.notifs?.practiceReminder !== false
+    if (isPracticeReminderEnabled && 'Notification' in window && Notification.permission === 'granted') {
+      const lastAttemptDate = profile.lastAptitudeAttempt?.toDate ? profile.lastAptitudeAttempt.toDate() : null
+      const completedToday = lastAttemptDate ? isSameDay(lastAttemptDate, new Date()) : false
+      
+      if (!completedToday) {
+        const notifiedThisSession = sessionStorage.getItem('plx_practice_notified')
+        if (!notifiedThisSession) {
+          sessionStorage.setItem('plx_practice_notified', 'true')
+          new Notification('Daily Practice Reminder 📚', {
+            body: `Hi ${displayName}, don't forget to practice coding and aptitude tests today to maintain your streak!`,
+            icon: '/favicon.ico'
+          })
+        }
+      }
+    }
+  }, [profile, displayName])
 
   // ── Skill pillars — each maps to a REAL Firestore field ──────
   const pillars = (DEPT_PILLARS[branch] || DEPT_PILLARS.CSE).map((name, i) => {
@@ -319,24 +344,33 @@ export default function Dashboard({ setActivePage }) {
 
   const activeNotifications = notifications.filter(n => n.targetDept === 'ALL' || n.targetDept === branch)
 
+  // ── Radar chart preparation data ──
+  const radarData = [
+    { subject: 'Aptitude', score: aptitudeScore },
+    { subject: 'Coding DSA', score: codingScore || (profile?.lastCodingSession ? 60 : 15) },
+    { subject: 'Mock Interview', score: mockScore },
+    { subject: 'Streak', score: Math.min(100, currentStreak * 10) },
+    { subject: 'Completeness', score: (branch ? 35 : 0) + (profile?.name ? 35 : 0) + (profile?.unlockedBadges?.length ? 30 : 0) },
+  ]
+
+  // Find lowest scoring area for AI recommendation
+  const lowestArea = [...radarData].sort((a, b) => a.score - b.score)[0]
+  let placementAdvice = ''
+  if (lowestArea.subject === 'Aptitude') {
+    placementAdvice = 'Practice technical and logical aptitude tests to improve your speed and score.'
+  } else if (lowestArea.subject === 'Coding DSA') {
+    placementAdvice = 'Spend time solving DSA problems in the compiler workspace to build code confidence.'
+  } else if (lowestArea.subject === 'Mock Interview') {
+    placementAdvice = 'Ace real-time questions in the AI Mock Interview system to practice active delivery.'
+  } else if (lowestArea.subject === 'Streak') {
+    placementAdvice = 'Maintain daily practice sessions to build consistency and unlock higher readiness badges.'
+  } else {
+    placementAdvice = 'Make sure your profile detail fields and settings are completed and saved.'
+  }
+
   return (
     <div>
-      {/* ── Notification Banner ───────────────────────────────────── */}
-      {activeNotifications.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
-          {activeNotifications.map(n => (
-            <div key={n.id} style={{ background: n.type === 'alert' ? '#fee2e2' : n.type === 'success' ? '#dcfce7' : n.type === 'warning' ? '#fef3c7' : '#e0e7ff', border: `1.5px solid ${n.type === 'alert' ? '#fca5a5' : n.type === 'success' ? '#86efac' : n.type === 'warning' ? '#fde047' : '#c7d2fe'}`, borderRadius: 12, padding: '16px 20px', display: 'flex', gap: 16, alignItems: 'center' }}>
-              <div style={{ fontSize: 24 }}>
-                {n.type === 'alert' ? '🚨' : n.type === 'success' ? '✅' : n.type === 'warning' ? '⚠️' : '🔔'}
-              </div>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 15, color: '#111827', marginBottom: 2 }}>{n.title}</div>
-                <div style={{ fontSize: 13.5, color: '#374151', lineHeight: 1.4 }}>{n.message}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Removed dashboard notifications; users can access alerts via the bell icon in the top navigation bar. */}
 
       {/* ── New User Onboarding Card ── */}
       {readiness === 0 && !profile?.lastAptitudeAttempt && !profile?.lastInterviewDate && (
@@ -395,15 +429,82 @@ export default function Dashboard({ setActivePage }) {
         </div>
       )}
 
+      <style>{`
+        @keyframes floatSlow {
+          0% { transform: translateY(0px); }
+          50% { transform: translateY(-5px); }
+          100% { transform: translateY(0px); }
+        }
+        .magical-hero {
+          background: linear-gradient(135deg, rgba(108, 60, 225, 0.1) 0%, rgba(219, 39, 119, 0.05) 50%, rgba(59, 130, 246, 0.1) 100%) !important;
+          border: 1.5px solid rgba(108, 60, 225, 0.18) !important;
+          backdrop-filter: blur(20px);
+          box-shadow: 0 16px 40px rgba(108, 60, 225, 0.04) !important;
+          position: relative;
+          overflow: hidden;
+          border-radius: var(--radius-xl);
+          padding: 38px 42px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          min-height: 180px;
+          animation: floatSlow 6s ease-in-out infinite;
+        }
+        [data-theme='dark'] .magical-hero {
+          background: linear-gradient(135deg, rgba(20, 15, 40, 0.75) 0%, rgba(28, 16, 36, 0.75) 50%, rgba(14, 20, 42, 0.75) 100%) !important;
+          border: 1.5px solid rgba(124, 58, 237, 0.25) !important;
+          box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2), inset 0 1px 2px rgba(255, 255, 255, 0.04) !important;
+        }
+        .magical-btn {
+          background: linear-gradient(135deg, #6c3ce1 0%, #7c3aed 50%, #db2777 100%) !important;
+          box-shadow: 0 8px 22px rgba(108, 60, 225, 0.28) !important;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+          border: none !important;
+          color: #fff !important;
+          padding: 10px 22px !important;
+          border-radius: 999px !important;
+          font-weight: 800 !important;
+          display: inline-flex !important;
+          align-items: center !important;
+          gap: 8px !important;
+          cursor: pointer !important;
+        }
+        .magical-btn:hover {
+          transform: translateY(-2px) scale(1.02) !important;
+          box-shadow: 0 12px 28px rgba(108, 60, 225, 0.42) !important;
+        }
+        @media (max-width: 768px) {
+          .analytics-split-grid {
+            grid-template-columns: 1fr !important;
+            gap: 16px !important;
+          }
+        }
+      `}</style>
+
       {/* ── Hero ── */}
-      <section className="hero-section hero-aurora" style={{ marginBottom: 28 }}>
-        <div className="hero-text">
-          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--purple-primary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            {getGreeting()} 👋
+      <section className="magical-hero" style={{ marginBottom: 28 }}>
+        <div style={{
+          position: 'absolute', top: '-10%', right: '10%', width: '180px', height: '180px', borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(124,58,237,0.15) 0%, rgba(219,39,119,0.05) 60%, transparent 100%)',
+          filter: 'blur(15px)', pointerEvents: 'none'
+        }} />
+
+        <div className="hero-text" style={{ flex: 1, zIndex: 2 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 900, color: 'var(--purple-primary)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              ✨ WELCOME BACK, {displayName.toUpperCase()}
+            </span>
+          </div>
+          
+          <h1 style={{ fontSize: 26, fontWeight: 950, letterSpacing: '-0.6px', marginBottom: 8, color: 'var(--text-primary)', fontFamily: 'Urbanist, sans-serif' }}>
+            Unlock Your Placement Potential.
+          </h1>
+          
+          <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', marginBottom: 24, lineHeight: 1.55 }}>
+            Access structured study roadmaps, practice technical aptitude, and ace AI-driven mock interviews tailored for your success.
           </p>
-          <h1>{displayName}</h1>
-          <p>Your <strong>{deptLabel}</strong> placement hub is ready.</p>
-          <button className="btn-primary" type="button" onClick={() => go('resources')}>
+
+          <button className="magical-btn" type="button" onClick={() => go('resources')}>
             Open Placement Hub <ArrowRight size={17} aria-hidden="true" />
           </button>
         </div>
@@ -479,6 +580,68 @@ export default function Dashboard({ setActivePage }) {
         </span>
       </div>
 
+      {/* ── Placement Analytics Visualizer ── */}
+      <div style={{
+        background: 'var(--card-bg)',
+        border: '1.5px solid var(--card-border)',
+        borderRadius: 18,
+        padding: '24px 28px',
+        marginBottom: 28,
+        boxShadow: '0 4px 20px rgba(108, 60, 225, 0.02)'
+      }}>
+        <h3 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 16, color: 'var(--text-primary)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>📊 Placement Analytics Visualizer</span>
+        </h3>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 20 }}>Comprehensive analysis of your core preparation dimensions</p>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1.7fr', gap: 24, alignItems: 'center' }} className="analytics-split-grid">
+          {/* Column 1: Radar Chart */}
+          <div style={{ width: '100%', height: 240, display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'var(--main-bg)', borderRadius: 14, padding: 12, border: '1px solid var(--card-border)' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+                <PolarGrid stroke="var(--card-border)" />
+                <PolarAngleAxis dataKey="subject" tick={{ fill: 'var(--text-secondary)', fontSize: 11, fontWeight: 700 }} />
+                <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} />
+                <Radar name={displayName} dataKey="score" stroke="var(--purple-primary)" fill="var(--purple-soft)" fillOpacity={0.5} />
+                <RechartsTooltip formatter={(value) => [`${value}%`, 'Score']} />
+              </RadarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Column 2: Insights Card */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ background: 'var(--purple-xsoft)', border: '1px solid var(--purple-soft)', borderRadius: 14, padding: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <span style={{ fontSize: 20 }}>💡</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--purple-primary)', textTransform: 'uppercase', letterSpacing: 0.8 }}>AI Placement Recommendation</span>
+              </div>
+              <p style={{ fontSize: 13.5, color: 'var(--text-primary)', lineHeight: 1.6, margin: 0, fontWeight: 600 }}>
+                Your lowest prep area is <strong style={{ color: 'var(--purple-primary)' }}>{lowestArea.subject}</strong> ({lowestArea.score}%).
+              </p>
+              <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 6, margin: '6px 0 0' }}>
+                {placementAdvice}
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ padding: 12, background: 'var(--main-bg)', border: '1px solid var(--card-border)', borderRadius: 12, textAlign: 'center' }}>
+                <div style={{ fontSize: 22, fontWeight: 900, color: 'var(--purple-primary)', fontFamily: 'Urbanist, sans-serif' }}>{readiness}%</div>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginTop: 2 }}>Readiness</div>
+              </div>
+              <button 
+                onClick={() => go(lowestArea.subject === 'Aptitude' ? 'aptitude' : lowestArea.subject === 'Coding DSA' ? 'coding' : lowestArea.subject === 'Mock Interview' ? 'interview' : 'resources')}
+                style={{ padding: 12, background: 'var(--purple-primary)', border: 'none', borderRadius: 12, color: '#fff', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, transition: 'transform 0.2s' }}
+                onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
+                onMouseLeave={e => e.currentTarget.style.transform = 'none'}
+              >
+                <span>⚡ Auto-Improve</span>
+                <span style={{ fontSize: 9.5, opacity: 0.9, fontWeight: 600 }}>Go to {lowestArea.subject}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* ── User info strip ── */}
       <div className="user-progress-strip" style={{ marginBottom: 28 }}>
         <div>
@@ -495,28 +658,7 @@ export default function Dashboard({ setActivePage }) {
         </div>
       </div>
 
-      {/* ── Quick Access ── */}
-      <div className="section-header" style={{ marginBottom: 14 }}>
-        <span className="section-title">Quick Access</span>
-      </div>
-      <div className="quick-nav-grid" style={{ marginBottom: 28 }}>
-        {QUICK_NAV.map(q => {
-          const Icon = q.icon
-          return (
-            <button key={q.page} type="button" className="quick-nav-card"
-              style={{ background: q.bg }} onClick={() => go(q.page)}>
-              <div className="quick-nav-icon" style={{ background: q.iconBg, color: q.color }}>
-                <Icon size={22} aria-hidden="true" />
-              </div>
-              <div className="quick-nav-label">{q.label}</div>
-              <div className="quick-nav-sub">{q.sub}</div>
-              <div className="quick-nav-arrow" style={{ color: q.color }}>
-                <ArrowRight size={14} />
-              </div>
-            </button>
-          )
-        })}
-      </div>
+
 
       {/* ── Explore by Dept ── */}
       <div className="section-header" style={{ marginBottom: 14 }}>

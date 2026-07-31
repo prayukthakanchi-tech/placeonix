@@ -1,11 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore'
+import { collection, addDoc, serverTimestamp, query, where, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useAuth } from '../context/AuthContext'
-
-// ── Razorpay Key (replace with your live key) ─────────────────────
-const RAZORPAY_KEY = 'rzp_test_REPLACE_WITH_YOUR_KEY'
-
 // ── Plans ─────────────────────────────────────────────────────────
 const PLANS = [
   {
@@ -76,19 +72,6 @@ const ORDER_STATUSES = [
 function generateOrderId() {
   return 'PLX-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase()
 }
-
-// ── Load Razorpay script ──────────────────────────────────────────
-function loadRazorpay() {
-  return new Promise((resolve) => {
-    if (window.Razorpay) return resolve(true)
-    const script = document.createElement('script')
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js'
-    script.onload = () => resolve(true)
-    script.onerror = () => resolve(false)
-    document.body.appendChild(script)
-  })
-}
-
 // ── Simulated ATS Score ───────────────────────────────────────────
 function simulateATSScore(fileName) {
   const seed = fileName.length
@@ -120,12 +103,40 @@ function TrustBar() {
   )
 }
 
+const SCAN_STEPS = [
+  'Parsing layout margins and fonts...',
+  'Identifying contact details & links...',
+  'Counting action verbs (quantified achievements)...',
+  'Cross-referencing industry standard keywords...',
+  'Calculating placement readiness index...',
+]
+
 function ATSChecker({ onUpgrade }) {
   const [file, setFile] = useState(null)
   const [score, setScore] = useState(null)
   const [analyzing, setAnalyzing] = useState(false)
+  const [activeScanStep, setActiveScanStep] = useState(0)
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef()
+
+  useEffect(() => {
+    let interval
+    if (analyzing) {
+      setActiveScanStep(0)
+      interval = setInterval(() => {
+        setActiveScanStep(prev => {
+          if (prev >= 5) {
+            clearInterval(interval)
+            return 5
+          }
+          return prev + 1
+        })
+      }, 900)
+    } else {
+      setActiveScanStep(0)
+    }
+    return () => clearInterval(interval)
+  }, [analyzing])
 
   function handleFile(f) {
     if (!f) return
@@ -140,7 +151,7 @@ function ATSChecker({ onUpgrade }) {
     setTimeout(() => {
       setScore(simulateATSScore(f.name))
       setAnalyzing(false)
-    }, 2200)
+    }, 4800)
   }
 
   const scoreColor = score < 50 ? '#ef4444' : score < 70 ? '#f97316' : '#16a34a'
@@ -158,25 +169,162 @@ function ATSChecker({ onUpgrade }) {
       </p>
 
       {/* Drop zone */}
-      <div
-        onClick={() => inputRef.current?.click()}
-        onDragOver={e => { e.preventDefault(); setDragging(true) }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
-        style={{ border: `2px dashed ${dragging ? '#7c3aed' : '#d1d5db'}`, borderRadius: 14, padding: '28px 20px', textAlign: 'center', cursor: 'pointer', background: dragging ? '#f5f3ff' : '#fafafa', transition: 'all 0.2s', marginBottom: 16 }}
-      >
-        <div style={{ fontSize: 32, marginBottom: 8 }}>☁️</div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#374151', marginBottom: 4 }}>
-          {file ? `✅ ${file.name}` : 'Drop your resume here or click to upload'}
+      {!analyzing && score === null && (
+        <div
+          onClick={() => inputRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
+          style={{ border: `2px dashed ${dragging ? '#7c3aed' : '#d1d5db'}`, borderRadius: 14, padding: '28px 20px', textAlign: 'center', cursor: 'pointer', background: dragging ? '#f5f3ff' : '#fafafa', transition: 'all 0.2s', marginBottom: 16 }}
+        >
+          <div style={{ fontSize: 32, marginBottom: 8 }}>☁️</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#374151', marginBottom: 4 }}>
+            {file ? `✅ ${file.name}` : 'Drop your resume here or click to upload'}
+          </div>
+          <div style={{ fontSize: 12, color: '#9ca3af' }}>PDF, DOC, DOCX • Max 5MB</div>
+          <input ref={inputRef} type="file" accept=".pdf,.doc,.docx" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
         </div>
-        <div style={{ fontSize: 12, color: '#9ca3af' }}>PDF, DOC, DOCX • Max 5MB</div>
-        <input ref={inputRef} type="file" accept=".pdf,.doc,.docx" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
-      </div>
+      )}
 
+      {/* High-Tech Animated Scanning Console */}
       {analyzing && (
-        <div style={{ textAlign: 'center', padding: '16px 0' }}>
-          <div style={{ display: 'inline-block', width: 32, height: 32, border: '3px solid #e5e7eb', borderTopColor: '#7c3aed', borderRadius: 999, animation: 'spin 0.8s linear infinite', marginBottom: 10 }} />
-          <div style={{ fontSize: 13, color: '#6b7280', fontWeight: 600 }}>Analyzing your resume against ATS filters...</div>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'row',
+          gap: 24,
+          background: '#0f172a',
+          borderRadius: 16,
+          padding: 24,
+          border: '1.5px solid #1e293b',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+          alignItems: 'stretch',
+          flexWrap: 'wrap',
+          marginBottom: 16,
+          boxSizing: 'border-box'
+        }}>
+          {/* Document Preview with Scanline */}
+          <div style={{
+            flex: '1 1 200px',
+            background: '#1e293b',
+            borderRadius: 12,
+            position: 'relative',
+            overflow: 'hidden',
+            height: '240px',
+            border: '1px solid #334155',
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '16px',
+            boxSizing: 'border-box'
+          }}>
+            {/* Simulated resume contents */}
+            <div style={{ width: '40%', height: '12px', background: 'rgba(255,255,255,0.15)', borderRadius: '4px', marginBottom: '16px' }} />
+            <div style={{ width: '80%', height: '8px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', marginBottom: '8px' }} />
+            <div style={{ width: '90%', height: '8px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', marginBottom: '8px' }} />
+            <div style={{ width: '75%', height: '8px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', marginBottom: '16px' }} />
+            
+            <div style={{ width: '35%', height: '10px', background: 'rgba(255,255,255,0.15)', borderRadius: '4px', marginBottom: '12px' }} />
+            <div style={{ width: '85%', height: '8px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', marginBottom: '8px' }} />
+            <div style={{ width: '70%', height: '8px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', marginBottom: '8px' }} />
+            
+            <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.06)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <span style={{ fontSize: '14px' }}>📄</span>
+              <span style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>
+                {file ? file.name : 'resume.pdf'}
+              </span>
+            </div>
+
+            {/* Glowing Scanline */}
+            <div style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              height: '4px',
+              background: 'linear-gradient(90deg, transparent, #a855f7, #6366f1, #a855f7, transparent)',
+              boxShadow: '0 0 14px 3px rgba(139, 92, 246, 0.8)',
+              animation: 'scanEffect 2.4s ease-in-out infinite',
+              pointerEvents: 'none'
+            }} />
+          </div>
+
+          {/* AI Parser Diagnostic Terminal */}
+          <div style={{
+            flex: '1.5 1 280px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            minHeight: '240px',
+            boxSizing: 'border-box'
+          }}>
+            <div>
+              <div style={{
+                fontFamily: '"Courier New", Courier, monospace',
+                fontSize: '12px',
+                color: '#64748b',
+                marginBottom: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                borderBottom: '1px solid #1e293b',
+                paddingBottom: '6px'
+              }}>
+                <span>🤖 PLACEONIX AI SCANNER v2.0</span>
+                <span style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', display: 'inline-block', animation: 'blink 1s infinite' }} />
+                  ONLINE
+                </span>
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {SCAN_STEPS.map((stepText, idx) => {
+                  const isDone = idx < activeScanStep
+                  const isCurrent = idx === activeScanStep
+                  
+                  let icon = '[ ]'
+                  let color = '#475569'
+                  let fontWeight = 400
+                  
+                  if (isDone) {
+                    icon = '[✓]'
+                    color = '#34d399'
+                    fontWeight = 600
+                  } else if (isCurrent) {
+                    icon = '[⏳]'
+                    color = '#60a5fa'
+                    fontWeight = 700
+                  }
+                  
+                  return (
+                    <div key={idx} style={{
+                      fontFamily: '"Courier New", Courier, monospace',
+                      fontSize: '12.5px',
+                      color: color,
+                      fontWeight: fontWeight,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      transition: 'color 0.3s ease'
+                    }}>
+                      <span style={{ flexShrink: 0, color: isDone ? '#10b981' : isCurrent ? '#3b82f6' : '#475569' }}>{icon}</span>
+                      <span style={{ animation: isCurrent ? 'textPulse 1.5s infinite' : 'none' }}>{stepText}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div style={{
+              marginTop: '16px',
+              borderTop: '1px solid #1e293b',
+              paddingTop: '10px',
+              fontFamily: '"Courier New", Courier, monospace',
+              fontSize: '12px',
+              color: activeScanStep === 5 ? '#34d399' : '#3b82f6',
+              fontWeight: 600,
+              animation: 'pulseText 1.5s infinite'
+            }}>
+              {activeScanStep === 5 ? '> DIAGNOSTICS COMPLETE. INITIALIZING REPORT...' : `> PROGRESS: ${Math.round((activeScanStep / 5) * 100)}%`}
+            </div>
+          </div>
         </div>
       )}
 
@@ -239,7 +387,26 @@ function ATSChecker({ onUpgrade }) {
           </div>
         </div>
       )}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes scanEffect {
+          0% { top: 0%; }
+          50% { top: calc(100% - 4px); }
+          100% { top: 0%; }
+        }
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
+        }
+        @keyframes pulseText {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.7; }
+        }
+        @keyframes textPulse {
+          0%, 100% { text-shadow: 0 0 2px rgba(96,165,250,0.2); }
+          50% { text-shadow: 0 0 8px rgba(96,165,250,0.6); }
+        }
+      `}</style>
     </div>
   )
 }
@@ -291,7 +458,7 @@ function BeforeAfter() {
           <h2 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 28, color: '#fff', marginBottom: 12 }}>Before vs After Optimization</h2>
           <p style={{ fontSize: 15, color: '#94a3b8' }}>See the difference a professionally optimized resume makes.</p>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 24 }}>
           {/* Before */}
           <div style={{ background: 'rgba(239,68,68,0.08)', border: '1.5px solid rgba(239,68,68,0.25)', borderRadius: 16, padding: '24px 22px' }}>
             <div style={{ fontSize: 13, fontWeight: 800, color: '#f87171', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -505,6 +672,18 @@ function PaymentModal({ plan, onClose, onSuccess }) {
         updatedAt: serverTimestamp(),
         deliveryDays: plan.delivery,
       })
+      if (user?.uid) {
+        await updateDoc(doc(db, 'users', user.uid), {
+          resumeStatus: 'resume_received',
+          resumeNotes: null,
+          deliveredResumeUrl: null,
+          deliveredResumeName: null,
+          resumeFileName: form.file.name,
+          resumeUrl: uploadResult.secure_url,
+          updatedAt: serverTimestamp(),
+        })
+      }
+
       setSubmitted(true)
       setStep(4)
       onSuccess && onSuccess({ orderId, planName: plan.name, docId: docRef.id })
@@ -810,12 +989,112 @@ function FAQSection() {
   )
 }
 
+const STEPS = [
+  { key: 'payment_received', label: 'Payment Received', icon: '💰' },
+  { key: 'resume_received', label: 'Resume Received', icon: '📄' },
+  { key: 'under_review', label: 'Under Review', icon: '🔍' },
+  { key: 'optimization_in_progress', label: 'Optimizing', icon: '⚙️' },
+  { key: 'delivered', label: 'Delivered', icon: '🎁' }
+]
+
+function OrderProgressTracker({ status }) {
+  const currentIdx = STEPS.findIndex(s => s.key === status)
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '24px 0 16px', position: 'relative' }}>
+      {/* Background line */}
+      <div style={{ position: 'absolute', top: 18, left: 15, right: 15, height: 3, background: '#e2e8f0', zIndex: 0 }} />
+      {/* Fill line */}
+      <div style={{
+        position: 'absolute',
+        top: 18,
+        left: 15,
+        width: `${(currentIdx / (STEPS.length - 1)) * 100}%`,
+        height: 3,
+        background: 'linear-gradient(90deg, #6c3ce1, #7c3aed)',
+        zIndex: 0,
+        transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1)'
+      }} />
+
+      {STEPS.map((step, idx) => {
+        const active = idx <= currentIdx
+        const isCurrent = idx === currentIdx
+        return (
+          <div key={step.key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 1, flex: 1 }}>
+            <div style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              background: isCurrent 
+                ? 'linear-gradient(135deg, #6c3ce1, #7c3aed)' 
+                : active 
+                  ? '#10b981'
+                  : '#fff',
+              border: `2px solid ${isCurrent ? '#7c3aed' : active ? '#10b981' : '#cbd5e1'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: active ? '#fff' : '#94a3b8',
+              fontSize: '15px',
+              boxShadow: isCurrent 
+                ? '0 0 0 4px rgba(124, 58, 237, 0.25), 0 4px 10px rgba(108,60,225,0.3)' 
+                : active 
+                  ? '0 4px 10px rgba(16, 185, 129, 0.2)' 
+                  : 'none',
+              transform: isCurrent ? 'scale(1.1)' : 'scale(1)',
+              transition: 'all 0.3s ease',
+              animation: isCurrent ? 'pulseRing 1.5s infinite' : 'none'
+            }}>
+              {active && !isCurrent ? '✓' : step.icon}
+            </div>
+            <span style={{
+              fontSize: 10,
+              fontWeight: active ? 800 : 500,
+              color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+              marginTop: 6,
+              textAlign: 'center',
+              lineHeight: 1.2
+            }}>
+              {step.label}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────
 export default function ResumeATS() {
   const [selectedPlan, setSelectedPlan]   = useState(null)
   const [purchasedPlan, setPurchasedPlan] = useState(null)
+  const [hoveredOrder, setHoveredOrder]   = useState(null)
+  
+  const { user } = useAuth()
+  const [userOrders, setUserOrders] = useState([])
+  const [loadingOrders, setLoadingOrders] = useState(true)
+
+  useEffect(() => {
+    if (!user) {
+      setLoadingOrders(false)
+      return
+    }
+    const q = query(
+      collection(db, 'orders'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    )
+    const unsub = onSnapshot(q, (snap) => {
+      setUserOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      setLoadingOrders(false)
+    }, (err) => {
+      console.error('Error fetching orders:', err)
+      setLoadingOrders(false)
+    })
+    return unsub
+  }, [user])
+
   const pricingRef = useRef()
 
   function scrollToPricing() {
@@ -828,6 +1107,231 @@ export default function ResumeATS() {
 
   return (
     <div style={{ marginLeft: -24, marginRight: -24, marginTop: -24 }}>
+
+      {/* ── Student Order History Hub ── */}
+      {user && userOrders.length > 0 && (
+        <div style={{ padding: '32px 24px', background: 'var(--main-bg)', borderBottom: '1px solid var(--card-border)' }}>
+          <div style={{ maxWidth: 900, margin: '0 auto' }}>
+            <h2 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 21, color: 'var(--text-primary)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>📦</span> Your Orders & Deliveries
+            </h2>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>
+              Track the progress of your purchased packages and download completed files.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {userOrders.map((order) => {
+                const isDelivered = order.status === 'delivered'
+                const formattedDate = order.createdAt?.toDate 
+                  ? order.createdAt.toDate().toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })
+                  : '—'
+                return (
+                  <div key={order.id}
+                    onMouseEnter={() => setHoveredOrder(order.id)}
+                    onMouseLeave={() => setHoveredOrder(null)}
+                    style={{
+                      background: 'var(--card-bg)',
+                      border: hoveredOrder === order.id ? '1.5px solid #7c3aed' : '1.5px solid var(--card-border)',
+                      borderRadius: 18,
+                      padding: '24px 20px',
+                      boxShadow: hoveredOrder === order.id ? '0 12px 28px rgba(124, 58, 237, 0.08)' : '0 4px 16px rgba(0,0,0,0.02)',
+                      transform: hoveredOrder === order.id ? 'translateY(-2px)' : 'translateY(0)',
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                    }}>
+                    {/* Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16, borderBottom: '1px solid var(--card-border)', paddingBottom: 16 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)' }}>
+                            {order.planName}
+                          </span>
+                          <span style={{
+                            fontSize: 10,
+                            fontWeight: 800,
+                            background: order.planId === 'success' ? '#dcfce7' : order.planId === 'upgrade' ? '#f5f3ff' : '#eff6ff',
+                            color: order.planId === 'success' ? '#15803d' : order.planId === 'upgrade' ? '#6d28d9' : '#1d4ed8',
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            textTransform: 'uppercase'
+                          }}>
+                            {order.planId || 'starter'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                          Order ID: <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--purple-primary)' }}>{order.orderId}</span> · Ordered on {formattedDate}
+                        </div>
+                        
+                        {/* File Badge */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, background: 'var(--bg-secondary)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--card-border)', marginTop: 4, width: 'fit-content' }}>
+                          <span style={{ fontSize: 14 }}>📄</span>
+                          <span style={{ fontWeight: 600, color: 'var(--text-secondary)', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {order.resumeFileName || 'resume.pdf'}
+                          </span>
+                          {order.resumeUrl && (
+                            <a href={order.resumeUrl} target="_blank" rel="noreferrer" style={{ marginLeft: 6, color: '#7c3aed', textDecoration: 'none', fontWeight: 700, fontSize: 11, borderLeft: '1px solid var(--card-border)', paddingLeft: 8 }}>
+                              View Original ↗
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                        <div style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-primary)' }}>
+                          ₹{order.price}
+                        </div>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          background: isDelivered ? '#dcfce7' : '#fff7ed',
+                          color: isDelivered ? '#16a34a' : '#ea580c',
+                          padding: '4px 12px',
+                          borderRadius: 999,
+                          border: `1px solid ${isDelivered ? '#86efac' : '#ffedd5'}`,
+                          textTransform: 'uppercase',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: isDelivered ? '#10b981' : '#f97316', display: 'inline-block', animation: isDelivered ? 'none' : 'blink 1.2s infinite' }} />
+                          {isDelivered ? 'Delivered' : 'In Progress'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Progress tracker */}
+                    <div style={{ padding: '16px 0 10px' }}>
+                      <OrderProgressTracker status={order.status} />
+                    </div>
+
+                    {/* Delivery Section */}
+                    {isDelivered ? (
+                      <div style={{
+                        marginTop: 18,
+                        padding: '20px',
+                        background: 'linear-gradient(135deg, #f5f3ff 0%, #fff 100%)',
+                        border: '1.5px solid #c4b5fd',
+                        borderRadius: 16,
+                        boxShadow: '0 4px 20px rgba(109, 40, 217, 0.03)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 900, color: '#4c1d95', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span>🎉</span> Your optimized resume is ready!
+                            </div>
+                            <div style={{ fontSize: 12.5, color: '#6d28d9', marginTop: 4 }}>
+                              We've enhanced formatting, structure, and keywords for optimal ATS scoring.
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            {order.resumeUrl && (
+                              <a href={order.resumeUrl} target="_blank" rel="noreferrer" style={{
+                                padding: '10px 18px',
+                                background: '#fff',
+                                color: '#4c1d95',
+                                border: '1.5px solid #c4b5fd',
+                                textDecoration: 'none',
+                                borderRadius: 10,
+                                fontSize: 13,
+                                fontWeight: 800,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                transition: 'all 0.2s'
+                              }}>
+                                Compare ↗
+                              </a>
+                            )}
+                            {order.deliveredResumeUrl && (
+                              <a href={order.deliveredResumeUrl} target="_blank" rel="noreferrer" style={{
+                                padding: '10px 20px',
+                                background: 'linear-gradient(135deg, #6c3ce1, #7c3aed)',
+                                color: '#fff',
+                                textDecoration: 'none',
+                                borderRadius: 10,
+                                fontSize: 13,
+                                fontWeight: 800,
+                                boxShadow: '0 4px 14px rgba(109,40,217,0.3)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                transition: 'all 0.2s'
+                              }}>
+                                📥 Download Resume
+                              </a>
+                            )}
+                          </div>
+                        </div>
+
+                        {order.adminNotes && (
+                          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1.5px dashed #c4b5fd' }}>
+                            <div style={{ fontSize: 12, fontWeight: 800, color: '#5b21b6', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span>💡</span> Expert Feedback & Actionable Insights
+                            </div>
+                            <div style={{
+                              background: '#fff',
+                              border: '1.5px solid #ede9fe',
+                              borderLeft: '4px solid #7c3aed',
+                              borderRadius: 10,
+                              padding: '14px 16px',
+                              fontSize: 13,
+                              color: '#374151',
+                              lineHeight: 1.6,
+                              whiteSpace: 'pre-line'
+                            }}>
+                              {order.adminNotes}
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, fontSize: 11, color: '#8b5cf6', fontWeight: 600 }}>
+                          <span>⏱️ Delivered on schedule</span>
+                          <span style={{ fontStyle: 'italic' }}>
+                            Need adjustments? Email <a href="mailto:prayukthakanchi@gmail.com" style={{ color: '#6d28d9', fontWeight: 700, textDecoration: 'underline' }}>prayukthakanchi@gmail.com</a>
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{
+                        marginTop: 18,
+                        padding: '16px 20px',
+                        background: 'linear-gradient(135deg, #fef8f3 0%, #fff 100%)',
+                        border: '1.5px solid #ffedd5',
+                        borderRadius: 16,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 12
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 20, animation: 'spin 3s linear infinite', display: 'inline-block' }}>⚙️</span>
+                          <div>
+                            <div style={{ fontSize: 13.5, fontWeight: 800, color: '#9a3412' }}>
+                              ATS Specialist is reviewing your resume
+                            </div>
+                            <div style={{ fontSize: 12, color: '#c2410c', marginTop: 2 }}>
+                              Turnaround: <strong>{order.deliveryDays || '48 hours'}</strong>. We are matching standard keywords and formatting layouts.
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{
+                          fontSize: 11.5,
+                          color: '#7c2d12',
+                          background: 'rgba(255, 237, 213, 0.4)',
+                          padding: '8px 12px',
+                          borderRadius: 8,
+                          border: '1px solid rgba(255, 237, 213, 0.8)',
+                          lineHeight: 1.5
+                        }}>
+                          ℹ️ We will send you an email notification as soon as your optimized resume is ready for download.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Hero ── */}
       <div style={{ background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 60%, #0d0d1a 100%)', padding: '64px 24px 52px', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
@@ -915,6 +1419,11 @@ export default function ResumeATS() {
       <style>{`
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         @keyframes spin  { to { transform: rotate(360deg); } }
+        @keyframes pulseRing {
+          0% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4), 0 4px 10px rgba(108,60,225,0.3); }
+          70% { box-shadow: 0 0 0 6px rgba(124, 58, 237, 0), 0 4px 10px rgba(108,60,225,0.3); }
+          100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0), 0 4px 10px rgba(108,60,225,0.3); }
+        }
       `}</style>
     </div>
   )

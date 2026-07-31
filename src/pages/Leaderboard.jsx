@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react'
 import { collection, query, orderBy, onSnapshot, limit } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useAuth } from '../context/AuthContext'
+import { BADGES } from '../utils/badges.js'
 
-const TABS = ['Overall', 'Aptitude', 'Coding', 'XP']
+const TABS = ['Overall', 'Aptitude', 'Coding', 'AI Interview', 'Streak']
 
 const MEDALS = ['🥇', '🥈', '🥉']
 
@@ -15,23 +16,26 @@ const TOP3_STYLES = [
 ]
 
 function getRankField(tab) {
-  if (tab === 'Aptitude') return 'mockInterviewScore'
-  if (tab === 'Coding')   return 'skillsCompleted'
-  if (tab === 'XP')       return 'xp'
+  if (tab === 'Aptitude')     return 'aptitudeScore'
+  if (tab === 'Coding')       return 'codingScore'
+  if (tab === 'AI Interview') return 'mockInterviewScore'
+  if (tab === 'Streak')       return 'bestStreak'
   return 'placementReadiness'
 }
 
 function getRankLabel(tab) {
-  if (tab === 'Aptitude') return 'Score'
-  if (tab === 'Coding')   return 'Problems'
-  if (tab === 'XP')       return 'XP'
+  if (tab === 'Aptitude')     return 'Aptitude'
+  if (tab === 'Coding')       return 'Score'
+  if (tab === 'AI Interview') return 'Score'
+  if (tab === 'Streak')       return 'Streak'
   return 'Readiness'
 }
 
 function getRankUnit(tab) {
-  if (tab === 'Aptitude') return 'pts'
-  if (tab === 'Coding')   return 'solved'
-  if (tab === 'XP')       return 'xp'
+  if (tab === 'Aptitude')     return '%'
+  if (tab === 'Coding')       return '%'
+  if (tab === 'AI Interview') return 'pts'
+  if (tab === 'Streak')       return 'days'
   return '%'
 }
 
@@ -70,6 +74,17 @@ function PodiumCard({ user, rank, tab }) {
         </div>
         <div style={{ fontSize: 18, marginBottom: 6 }}>{MEDALS[rank]}</div>
         <div style={{ fontSize: 14, fontWeight: 800, color: '#111827', marginBottom: 2 }}>{displayName}</div>
+        
+        {/* Render badges */}
+        {user.unlockedBadges && user.unlockedBadges.length > 0 && (
+          <div style={{ display: 'flex', gap: 4, justifyContent: 'center', margin: '4px 0 8px' }} title={user.unlockedBadges.map(bid => BADGES.find(x => x.id === bid)?.name).join(', ')}>
+            {user.unlockedBadges.slice(0, 3).map(bid => {
+              const b = BADGES.find(x => x.id === bid)
+              return b ? <span key={bid} style={{ fontSize: 12.5 }} title={b.name}>{b.emoji}</span> : null
+            })}
+          </div>
+        )}
+
         <div style={{ fontSize: 11.5, color: '#9ca3af', marginBottom: 10 }}>{user.branch || 'Student'}</div>
         <div style={{ fontSize: 22, fontWeight: 900, color: rank === 0 ? '#d97706' : rank === 1 ? '#64748b' : '#ea580c', fontFamily: 'Urbanist, sans-serif' }}>
           {user[field] ?? 0}<span style={{ fontSize: 12, fontWeight: 600, color: '#9ca3af', marginLeft: 3 }}>{unit}</span>
@@ -221,7 +236,17 @@ export default function Leaderboard() {
                         <span style={{ fontSize: 14, fontWeight: 700, color: isMe ? '#7c3aed' : '#111827' }}>{displayName}</span>
                         {isMe && <span style={{ fontSize: 10, fontWeight: 800, color: '#7c3aed', background: '#f5f3ff', padding: '1px 7px', borderRadius: 999, border: '1px solid #c4b5fd' }}>YOU</span>}
                       </div>
-                      <div style={{ fontSize: 11.5, color: '#9ca3af' }}>{u.branch || 'Student'}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11.5, color: '#9ca3af' }}>{u.branch || 'Student'}</span>
+                        {u.unlockedBadges && u.unlockedBadges.length > 0 && (
+                          <div style={{ display: 'flex', gap: 3 }} title={u.unlockedBadges.map(bid => BADGES.find(x => x.id === bid)?.name).join(', ')}>
+                            {u.unlockedBadges.slice(0, 3).map(bid => {
+                              const b = BADGES.find(x => x.id === bid)
+                              return b ? <span key={bid} style={{ fontSize: 11.5 }} title={b.name}>{b.emoji}</span> : null
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                     {/* Bar */}
                     <div style={{ flex: 1, maxWidth: 160 }}>

@@ -5,6 +5,7 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
+  sendEmailVerification,
 } from 'firebase/auth'
 import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
 import { auth, db } from '../firebase/config'
@@ -124,6 +125,13 @@ export function AuthProvider({ children }) {
     try {
       const credential = await createUserWithEmailAndPassword(auth, email, password)
 
+      // Send verification email
+      try {
+        await sendEmailVerification(credential.user)
+      } catch (verificationError) {
+        console.error('Failed to send verification email on signup:', verificationError)
+      }
+
       try {
         await setDoc(doc(db, 'users', credential.user.uid), {
           email,
@@ -177,6 +185,21 @@ export function AuthProvider({ children }) {
     await signOut(auth)
   }
 
+  async function sendVerification() {
+    if (auth.currentUser) {
+      await sendEmailVerification(auth.currentUser)
+    }
+  }
+
+  async function checkVerification() {
+    if (auth.currentUser) {
+      await auth.currentUser.reload()
+      setUser({ ...auth.currentUser })
+      return auth.currentUser.emailVerified
+    }
+    return false
+  }
+
   const value = useMemo(
     () => ({
       user,
@@ -187,6 +210,8 @@ export function AuthProvider({ children }) {
       resetPassword,
       updateUserProfile,
       logout,
+      sendVerification,
+      checkVerification,
     }),
     [user, profile, loading]
   )

@@ -31,12 +31,18 @@ export default async function handler(req, res) {
 
   try {
     const modelsToTry = [
-      'gemini-2.5-flash',
       'gemini-2.0-flash',
       'gemini-1.5-flash',
-      'gemini-1.5-flash-latest',
-      'gemini-pro'
+      'gemini-1.5-pro'
     ];
+
+    // Adapt { message: "..." } request format to Gemini contents schema
+    let requestBody = req.body;
+    if (requestBody && requestBody.message) {
+      requestBody = {
+        contents: [{ parts: [{ text: requestBody.message }] }]
+      };
+    }
 
     let upstream;
     let data;
@@ -47,7 +53,7 @@ export default async function handler(req, res) {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(req.body),
+          body: JSON.stringify(requestBody),
         }
       );
 
@@ -56,10 +62,9 @@ export default async function handler(req, res) {
       // If successful, break out of loop
       if (upstream.ok) break;
       
-      // If it's a 404 (model not found), try the next model
-      if (upstream.status === 404) continue;
+      // If it's 404, 400 or 503 (model unavalaible/deprecated), try next model
+      if ([400, 404, 503].includes(upstream.status)) continue;
       
-      // If it's some other error (like 403 invalid key, or 400 bad request), break and return it
       break;
     }
 
@@ -70,6 +75,10 @@ export default async function handler(req, res) {
         triedModels: modelsToTry
       })
     }
+
+    // Add .response field for compatibility with client code expecting data.response
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
+    data.response = text;
 
     return res.status(200).json(data)
   } catch (err) {

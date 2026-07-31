@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
-import { doc, updateDoc } from 'firebase/firestore'
+import { doc, updateDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { computeReadiness, parseInterviewScore } from '../utils/readiness.js'
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Tooltip } from 'recharts'
+import { getUnlockedBadges } from '../utils/badges.js'
 
 // ── Constants ─────────────────────────────────────────────────────
 const DEPARTMENTS = ['CSE', 'ECE', 'EEE', 'IT', 'ME', 'CIVIL', 'AERO', 'BME', 'BT']
@@ -21,6 +23,186 @@ const COMPANIES = ['TCS', 'Infosys', 'Wipro', 'Accenture', 'Cognizant', 'Amazon'
 const LEVELS = ['Fresher (0 exp)', 'Intern', '1–2 years exp']
 const FOCUS_TYPES = ['Technical & HR (Mixed)', 'HR & Behavioral Only', 'Technical Core Only']
 const QUIZ_COUNT = 7 // questions in prepare quiz before plan
+
+// ── Wandbox Compiler Settings ──────────────────────────────────────
+const COMPILER_LANGUAGES = [
+  { id: 71,  name: 'Python',     ext: 'py',   color: '#3b82f6', icon: '🐍' },
+  { id: 62,  name: 'Java',       ext: 'java', color: '#f97316', icon: '☕' },
+  { id: 54,  name: 'C++',        ext: 'cpp',  color: '#8b5cf6', icon: '🔷' },
+  { id: 63,  name: 'JavaScript', ext: 'js',   color: '#eab308', icon: '🟨' },
+  { id: 50,  name: 'C',          ext: 'c',    color: '#6b7280', icon: '⚙️' },
+]
+
+const WANDBOX_LANGS = {
+  71: { compiler: 'cpython-3.13.8' },
+  62: { compiler: 'openjdk-jdk-22+36' },
+  54: { compiler: 'gcc-13.2.0' },
+  63: { compiler: 'nodejs-20.17.0' },
+  50: { compiler: 'gcc-13.2.0-c' },
+}
+
+const DEFAULT_CODE = {
+  71: 'print("Hello, Python!")',
+  62: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, Java!");\n    }\n}',
+  54: '#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, C++!" << endl;\n    return 0;\n}',
+  63: 'console.log("Hello, JavaScript!");',
+  50: '#include <stdio.h>\n\nint main() {\n    printf("Hello, C!\\n");\n    return 0;\n}'
+}
+
+const LANGUAGE_NAMES = {
+  71: 'Python',
+  62: 'Java',
+  54: 'C++',
+  63: 'JavaScript',
+  50: 'C',
+}
+
+async function runCodeAI(sourceCode, languageId, stdin = '') {
+  const language = LANGUAGE_NAMES[languageId] || 'Python'
+  const prompt = `You are a secure, sandboxed code execution engine. Analyze the following source code and simulate its compilation and execution.
+
+Language: ${language}
+Stdin / Input:
+${stdin}
+
+Code to execute:
+${sourceCode}
+
+Instructions:
+1. Check for any syntax errors or compilation errors.
+2. If there are syntax or compilation errors:
+   Return a JSON object with:
+   {
+     "success": false,
+     "type": "Compile Error",
+     "output": "<the compiler error/warning message>"
+   }
+3. If the code compiles, simulate its execution line-by-line using the provided stdin.
+4. If there is a runtime error (e.g. division by zero, null pointer, index out of bounds, reference error):
+   Return a JSON object with:
+   {
+     "success": false,
+     "type": "Runtime Error",
+     "output": "<the runtime exception message and traceback>"
+   }
+5. If the execution is successful:
+   Return a JSON object with:
+   {
+     "success": true,
+     "output": "<the exact output printed to stdout>"
+   }
+
+Return ONLY the raw JSON object. Do not include markdown code block formatting (like \`\`\`json). Do not include any other text.`
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: prompt })
+    })
+
+    if (res.ok) {
+      const data = await res.json()
+      let text = data?.response || ''
+      text = text.replace(/\`\`\`json/gi, '').replace(/\`\`\`/gi, '').trim()
+      const parsed = JSON.parse(text)
+      return {
+        success: parsed.success,
+        output: parsed.output,
+        type: parsed.type || (parsed.success ? undefined : 'Runtime Error'),
+      }
+    }
+  } catch (err) {
+    console.warn("Serverless compiler proxy failed, trying direct browser fallback...", err)
+  }
+
+  try {
+    const key = import.meta.env.VITE_GEMINI_API_KEY
+    if (!key) throw new Error("VITE_GEMINI_API_KEY is not defined")
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      }
+    )
+
+    if (!res.ok) throw new Error(`Gemini direct status ${res.status}`)
+    const data = await res.json()
+    let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    text = text.replace(/\`\`\`json/gi, '').replace(/\`\`\`/gi, '').trim()
+    const parsed = JSON.parse(text)
+    return {
+      success: parsed.success,
+      output: parsed.output,
+      type: parsed.type || (parsed.success ? undefined : 'Runtime Error'),
+    }
+  } catch (err) {
+    return {
+      success: false,
+      output: `⚠️ Execution failed. Compiler server is currently down, and AI backup compiler could not be initialized: ${err.message}`,
+      type: 'Execution Error'
+    }
+  }
+}
+
+async function runCode(sourceCode, languageId, retries = 3) {
+  const langConfig = WANDBOX_LANGS[languageId]
+  if (!langConfig) return { success: false, output: 'Language not supported', type: 'Error' }
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch('https://wandbox.org/api/compile.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          compiler: langConfig.compiler,
+          code: sourceCode,
+        }),
+      })
+
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      const data = await res.json()
+
+      if (data.compiler_error || (data.status != 0 && !data.program_message)) {
+        const compileOut = (data.compiler_error || data.compiler_message || 'Compile error').trim()
+        if (compileOut.includes('Resource temporarily unavailable') || compileOut.includes('crun: clone')) {
+          console.warn("Wandbox is overloaded. Falling back to AI compiler...");
+          return await runCodeAI(sourceCode, languageId)
+        }
+        if (compileOut) return { success: false, output: compileOut, type: 'Compile Error' }
+      }
+
+      const stdout = (data.program_output || '').trim()
+      const stderr = (data.program_error || '').trim()
+
+      if (stderr.includes('Resource temporarily unavailable')) {
+        console.warn("Wandbox process space exhausted. Falling back to AI compiler...");
+        return await runCodeAI(sourceCode, languageId)
+      }
+
+      if (data.status != 0 && stderr) {
+        return { success: false, output: stderr, type: 'Runtime Error' }
+      }
+
+      return {
+        success: true,
+        output: stdout || stderr || '(no output)',
+      }
+    } catch (err) {
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 1000))
+        continue
+      }
+      console.warn(`Wandbox offline: ${err.message}. Falling back to AI compiler...`);
+      return await runCodeAI(sourceCode, languageId)
+    }
+  }
+}
 
 // ── Gemini AI Proxy ───────────────────────────────────────────────
 // Calls /api/chat (Vercel serverless function) — API key stays server-side.
@@ -41,7 +223,10 @@ async function callClaude(messages, systemPrompt) {
   const data = await response.json()
 
   if (!response.ok) {
-    const errMsg = data?.detail || data?.error || 'AI service unavailable. Please try again.';
+    let errMsg = data?.detail || data?.error || 'AI service unavailable. Please try again.';
+    if (response.status === 429) {
+      errMsg = 'AI is busy due to high traffic. Please wait 10-15 seconds and try again.';
+    }
     throw new Error(errMsg);
   }
 
@@ -217,8 +402,8 @@ Format: Just the question text, no numbering. Keep it conversational.`
         setCurrentQ(response)
         setQuestionIndex(i => i + 1)
       }
-    } catch {
-      setQuizMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Connection issue. Please try again.' }])
+    } catch (err) {
+      setQuizMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${err.message || 'AI is busy. Please wait 10-15 seconds and try again.'}` }])
     }
     setLoading(false)
   }
@@ -252,8 +437,8 @@ Be specific to their answers — address their weak areas and build on their str
 
       const result = await callClaude([{ role: 'user', content: prompt }], 'You are an expert placement coach for Indian engineering students. Give practical, actionable, specific advice. Use ## for sections, - for bullets, **bold** for key terms.')
       setPlan(result)
-    } catch {
-      setPlan('Failed to generate plan. Please refresh and try again.')
+    } catch (err) {
+      setPlan(`Failed to generate plan: ${err.message || 'Please refresh and try again in 10-15 seconds.'}`)
     }
     setLoadingPlan(false)
   }
@@ -267,7 +452,7 @@ Be specific to their answers — address their weak areas and build on their str
     <div>
       <PageHeader title="📚 Prepare for Interview" subtitle="Answer a short quiz — then get your full personalised prep plan" onBack={onBack} />
       <div style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 16, padding: '28px', maxWidth: 560, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 16, marginBottom: 20 }}>
           <SelectField label="Company *" value={form.company} onChange={v => setForm(f => ({ ...f, company: v }))} options={COMPANIES} placeholder="Select company" />
           <SelectField label="Your Branch *" value={form.dept} onChange={v => setForm(f => ({ ...f, dept: v, role: '' }))} options={DEPARTMENTS} placeholder="Select branch" />
           <SelectField label="Role *" value={form.role} onChange={v => setForm(f => ({ ...f, role: v }))} options={ROLES[form.dept] || []} placeholder={form.dept ? 'Select role' : 'Select branch first'} />
@@ -402,11 +587,28 @@ function LiveInterview({ onBack }) {
   const chatEndRef = useRef(null)
   const { user, profile } = useAuth()
 
-  // ── Voice mode state ─────────────────────────────────────────
+  // ── Voice mode state ──
   const [voiceMode, setVoiceMode] = useState(false)
   const [listening, setListening] = useState(false)
+  const [aiSpeaking, setAiSpeaking] = useState(false)
+  const [speechLang, setSpeechLang] = useState('en-IN')
   const [voiceStats, setVoiceStats] = useState({ totalMs: 0, fillerCount: 0 })
+  const [interviewStats, setInterviewStats] = useState({ totalWords: 0, totalMs: 0, fillerCount: 0 })
   const recognitionRef = useRef(null)
+
+  // ── Resume-tailoring & Compiler states ──
+  const [tailorResume, setTailorResume] = useState(false)
+  const [resumeText, setResumeText] = useState('')
+  const [compilerLang, setCompilerLang] = useState(71)
+  const [compilerCodeMap, setCompilerCodeMap] = useState({ ...DEFAULT_CODE })
+  const [compilerOutput, setCompilerOutput] = useState(null)
+  const [compilerRunning, setCompilerRunning] = useState(false)
+
+  useEffect(() => {
+    if (profile) {
+      setResumeText(`Candidate Name: ${profile.name || 'Student'}\nBranch: ${profile.branch || 'ECE'}\nCareer Goal: ${profile.careerGoal || 'Embedded Engineer'}\nSkills & Projects: `)
+    }
+  }, [profile])
 
   // Speak text via SpeechSynthesis (used when voice mode is on)
   function speakText(text) {
@@ -414,12 +616,45 @@ function LiveInterview({ onBack }) {
     window.speechSynthesis.cancel()
     const clean = text.replace(/[#*_`~>]/g, '').replace(/\s+/g, ' ').trim()
     const utter = new SpeechSynthesisUtterance(clean)
-    utter.rate = 0.95; utter.pitch = 1
+    utter.rate = 0.95
+    utter.pitch = 1
+    
+    utter.onstart = () => setAiSpeaking(true)
+    utter.onend = () => setAiSpeaking(false)
+    utter.onerror = () => setAiSpeaking(false)
+
     const voices = window.speechSynthesis.getVoices()
     const preferred = voices.find(v => v.lang.startsWith('en') && v.name.includes('Female'))
       || voices.find(v => v.lang.startsWith('en'))
     if (preferred) utter.voice = preferred
     window.speechSynthesis.speak(utter)
+  }
+
+  // ── Compiler Helper Functions ──
+  const compilerCode = compilerCodeMap[compilerLang] || ''
+  const setCompilerCode = (val) => setCompilerCodeMap(prev => ({ ...prev, [compilerLang]: val }))
+
+  async function handleCompilerRun() {
+    if (!compilerCode.trim()) return
+    setCompilerRunning(true)
+    setCompilerOutput(null)
+
+    if (compilerLang === 63) {
+      try {
+        const logs = []
+        const con = { log: (...a) => logs.push(a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')) }
+        new Function('console', compilerCode)(con)
+        setCompilerOutput({ success: true, output: logs.join('\n') || '(no output)' })
+      } catch (err) {
+        setCompilerOutput({ success: false, output: err.message, type: 'Error' })
+      }
+      setCompilerRunning(false)
+      return
+    }
+
+    const result = await runCode(compilerCode, compilerLang)
+    setCompilerOutput(result)
+    setCompilerRunning(false)
   }
 
   // Toggle microphone — fills textarea with recognised speech
@@ -433,24 +668,62 @@ function LiveInterview({ onBack }) {
     }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     const rec = new SR()
-    rec.lang = 'en-IN'; rec.interimResults = false; rec.maxAlternatives = 1
+    
+    // Enable continuous listening and real-time interim feedback
+    rec.continuous = true
+    rec.interimResults = true
+    rec.lang = speechLang
+    rec.maxAlternatives = 1
     
     const sessionStart = Date.now()
+    const baseText = input
 
     rec.onresult = (e) => {
-      const transcript = e.results[0][0].transcript
-      setInput(prev => prev ? prev + ' ' + transcript : transcript)
+      let finalTranscript = ''
+      let interimTranscript = ''
       
-      const sessionMs = Date.now() - sessionStart
-      const fillers = (transcript.match(/\b(um|uh|like|literally|you know)\b/gi) || []).length
-      
-      setVoiceStats(prev => ({ 
-        totalMs: prev.totalMs + sessionMs, 
-        fillerCount: prev.fillerCount + fillers 
-      }))
+      for (let i = e.resultIndex; i < e.results.length; ++i) {
+        if (e.results[i].isFinal) {
+          finalTranscript += e.results[i][0].transcript + ' '
+        } else {
+          interimTranscript += e.results[i][0].transcript
+        }
+      }
+
+      if (finalTranscript) {
+        const fillers = (finalTranscript.match(/\b(um|uh|like|literally|you know)\b/gi) || []).length
+        setVoiceStats(prev => ({
+          ...prev,
+          fillerCount: prev.fillerCount + fillers
+        }))
+      }
+
+      const fullText = (finalTranscript + interimTranscript).trim()
+      setInput(baseText ? baseText + ' ' + fullText : fullText)
     }
-    rec.onend = () => setListening(false)
-    rec.onerror = () => setListening(false)
+    
+    rec.onend = () => {
+      const sessionMs = Date.now() - sessionStart
+      setVoiceStats(prev => ({
+        ...prev,
+        totalMs: prev.totalMs + sessionMs
+      }))
+      setListening(false)
+    }
+    
+    rec.onerror = (event) => {
+      console.error("Speech recognition error:", event.error);
+      if (event.error === 'not-allowed') {
+        alert("Microphone permission denied. Please enable microphone permission in your browser's site settings next to the URL bar.");
+      } else if (event.error === 'no-speech') {
+        console.warn("No speech detected.");
+      } else if (event.error === 'network') {
+        alert("Network error occurred during speech recognition. Please check your internet connection.");
+      } else {
+        alert("Speech recognition error: " + event.error);
+      }
+      setListening(false)
+    }
     recognitionRef.current = rec
     rec.start(); setListening(true)
   }
@@ -477,7 +750,12 @@ function LiveInterview({ onBack }) {
     form.focus === 'Technical Core Only' ? `Focus strictly on deep technical questions, architecture, and coding concepts relevant to ${form.role}. DO NOT ask HR/behavioral questions.` :
     `Mix technical and HR questions relevant to ${form.dept} and ${form.role}`;
 
+  const resumePrompt = (tailorResume && resumeText.trim()) 
+    ? `\nCandidate Resume & Skills profile:\n${resumeText.trim()}\nTailor your questions to verify the skills, projects, and experiences listed in this resume context.`
+    : '';
+
   const sys = `You are a professional interviewer at ${form.company} for the role of ${form.role} (${form.dept}, ${form.level}).
+${resumePrompt}
 
 Rules:
 - Ask ONE question at a time
@@ -489,6 +767,7 @@ Format: feedback on answer (if any), then next question. Keep it professional an
 
   async function start() {
     setLoading(true); setStage('live'); setMessages([]); setQCount(0)
+    setInterviewStats({ totalWords: 0, totalMs: 0, fillerCount: 0 })
     try {
       const r = await callClaude([{ role: 'user', content: `Start. Briefly introduce yourself as ${form.company} interviewer and ask your first question.` }], sys)
       setMessages([{ role: 'assistant', content: r }]); setQCount(1)
@@ -506,9 +785,15 @@ Format: feedback on answer (if any), then next question. Keep it professional an
     let hiddenMeta = ''
     if (voiceStats.totalMs > 0) {
        const minutes = voiceStats.totalMs / 60000
-       const words = ans.split(/\s+/).length
+       const words = ans.split(/\s+/).filter(Boolean).length
        const wpm = Math.round(words / minutes)
        hiddenMeta = `\n[System Diagnostics: The candidate spoke at ${wpm} WPM (ideal 130-160) and used ${voiceStats.fillerCount} filler words. Factor this pacing and filler usage strictly into their feedback & Confidence/Communication scores.]`
+       
+       setInterviewStats(prev => ({
+         totalWords: prev.totalWords + words,
+         totalMs: prev.totalMs + voiceStats.totalMs,
+         fillerCount: prev.fillerCount + voiceStats.fillerCount
+       }))
     }
     setVoiceStats({ totalMs: 0, fillerCount: 0 })
 
@@ -533,18 +818,48 @@ Format: feedback on answer (if any), then next question. Keep it professional an
               currentStreak:      profile?.currentStreak ?? 0,
               codingScore:        profile?.codingScore ?? 0,
             })
+            
+            const isTechCoreFocus = form.focus === 'Technical Core Only'
+            const updatedProfileMock = {
+              ...profile,
+              mockInterviewScore: newMockScore,
+              technicalInterviewCompleted: profile?.technicalInterviewCompleted || isTechCoreFocus
+            }
+            const prevBadges = profile?.unlockedBadges || []
+            const currentUnlocked = getUnlockedBadges(updatedProfileMock)
+            const newlyUnlocked = currentUnlocked.filter(b => !prevBadges.includes(b))
+            const finalUnlocked = [...prevBadges, ...newlyUnlocked]
+
+            if (newlyUnlocked.length > 0) {
+              window.dispatchEvent(new CustomEvent('placeonix-badge-unlocked', { detail: { badgeIds: newlyUnlocked } }))
+            }
+
             updateDoc(doc(db, 'users', user.uid), {
               mockInterviewScore: newMockScore,
               interviewsCompleted: (profile?.interviewsCompleted ?? 0) + 1,
               lastInterviewDate:   new Date(),
               placementReadiness:  newReadiness,
+              technicalInterviewCompleted: profile?.technicalInterviewCompleted || isTechCoreFocus,
+              unlockedBadges:      finalUnlocked
+            }).catch(() => {})
+
+            // Write to interviews collection for institutional admin analytics
+            addDoc(collection(db, 'interviews'), {
+              uid: user.uid,
+              studentName: profile?.name || user.displayName || user.email.split('@')[0],
+              studentEmail: user.email,
+              branch: profile?.branch || 'CSE',
+              category: isTechCoreFocus ? 'Technical Core' : 'Behavioral & Fit',
+              score: Math.round(newMockScore / 10), // out of 10
+              feedback: 'Completed live chat-based mock interview session.',
+              createdAt: serverTimestamp()
             }).catch(() => {})
           } catch (_) {}
         }
       } else {
         setMessages(prev => [...prev, { role: 'assistant', content: r }]); setQCount(c => c + 1)
       }
-    } catch { setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Connection issue. Try again.' }]) }
+    } catch (err) { setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${err.message || 'AI is busy. Please wait 10-15 seconds and try again.'}` }]) }
     setLoading(false)
   }
 
@@ -552,59 +867,179 @@ Format: feedback on answer (if any), then next question. Keep it professional an
     <div>
       <PageHeader title="🎙️ Live Mock Interview" subtitle="AI interviews you in real time, gives feedback after each answer" onBack={onBack} />
       <div style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 16, padding: '28px', maxWidth: 560 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 16, marginBottom: 16 }}>
           <SelectField label="Company *" value={form.company} onChange={v => setForm(f => ({ ...f, company: v }))} options={COMPANIES} placeholder="Select" />
           <SelectField label="Branch *" value={form.dept} onChange={v => setForm(f => ({ ...f, dept: v, role: '' }))} options={DEPARTMENTS} placeholder="Select" />
           <SelectField label="Role *" value={form.role} onChange={v => setForm(f => ({ ...f, role: v }))} options={ROLES[form.dept] || []} placeholder={form.dept ? 'Select role' : 'Pick branch first'} />
           <SelectField label="Interview Focus" value={form.focus} onChange={v => setForm(f => ({ ...f, focus: v }))} options={FOCUS_TYPES} />
         </div>
-        <div style={{ display: 'flex', gap: 16, marginBottom: 22 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 16, marginBottom: 18 }}>
           <div style={{ flex: 1 }}>
             <SelectField label="Level" value={form.level} onChange={v => setForm(f => ({ ...f, level: v }))} options={LEVELS} />
           </div>
           <div style={{ flex: 1 }}>
             <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Questions</label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {[5, 7, 10].map(n => (
-              <button key={n} onClick={() => setForm(f => ({ ...f, rounds: n }))} style={{ padding: '8px 20px', borderRadius: 999, border: '1.5px solid', borderColor: form.rounds === n ? 'var(--purple-primary)' : 'var(--card-border)', background: form.rounds === n ? 'var(--purple-xsoft)' : '#fff', color: form.rounds === n ? 'var(--purple-primary)' : 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-                {n} Q
-              </button>
-            ))}
-          </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[5, 7, 10].map(n => (
+                <button key={n} onClick={() => setForm(f => ({ ...f, rounds: n }))} style={{ padding: '8px 20px', borderRadius: 999, border: '1.5px solid', borderColor: form.rounds === n ? 'var(--purple-primary)' : 'var(--card-border)', background: form.rounds === n ? 'var(--purple-xsoft)' : '#fff', color: form.rounds === n ? 'var(--purple-primary)' : 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                  {n} Q
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+
+        {/* 📋 Resume-Tailoring Panel */}
+        <div style={{ marginBottom: 18, borderTop: '1px solid #f3f4f6', paddingTop: 16 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)', cursor: 'pointer', userSelect: 'none' }}>
+            <input type="checkbox" checked={tailorResume} onChange={e => setTailorResume(e.target.checked)} style={{ width: 16, height: 16, accentColor: 'var(--purple-primary)', cursor: 'pointer' }} />
+            📋 Tailor questions using my resume/skills details
+          </label>
+          {tailorResume && (
+            <textarea value={resumeText} onChange={e => setResumeText(e.target.value)} rows={3}
+              placeholder="Enter key skills, projects, work experience, or copy-paste resume text..."
+              style={{ width: '100%', marginTop: 8, padding: '10px 12px', border: '1.5px solid var(--card-border)', borderRadius: 10, fontSize: 12.5, fontFamily: 'inherit', resize: 'vertical', outline: 'none', color: 'var(--text-primary)' }}
+              onFocus={e => e.target.style.borderColor = 'var(--purple-primary)'}
+              onBlur={e => e.target.style.borderColor = 'var(--card-border)'}
+            />
+          )}
+        </div>
+
         <Btn onClick={start} disabled={!form.company || !form.dept || !form.role} loading={loading}>🎙️ Start Interview</Btn>
       </div>
     </div>
   )
 
-  if (stage === 'result') return (
-    <div>
-      <PageHeader title="🏆 Interview Complete" onBack={() => { setStage('setup'); setMessages([]); setFinalFeedback('') }} />
-      <div style={{ background: 'linear-gradient(135deg, #ede9fe, #f5f3ff)', border: '1.5px solid var(--purple-soft)', borderRadius: 16, padding: '28px', marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid rgba(108,60,225,0.15)' }}>
-          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--purple-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🤖</div>
-          <div>
-            <div style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 17, color: 'var(--text-primary)' }}>Performance Review</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{form.company} · {form.role} · {form.rounds} questions</div>
+  if (stage === 'result') {
+    const scores = parseCategoryScores(finalFeedback)
+    const chartData = [
+      { subject: 'Communication', score: scores.Communication * 10 },
+      { subject: 'Technical Depth', score: scores.Technical * 10 },
+      { subject: 'Confidence', score: scores.Confidence * 10 },
+      { subject: 'Overall', score: scores.Overall * 10 }
+    ]
+
+    const pacingSeconds = interviewStats.totalMs / 1000
+    const minutes = pacingSeconds / 60
+    const wpm = minutes > 0 ? Math.round(interviewStats.totalWords / minutes) : 0
+    
+    let pacingStatus = 'N/A'
+    let pacingColor = '#6b7280'
+    let pacingTip = 'No speaking data recorded.'
+    
+    if (interviewStats.totalMs > 0) {
+      if (wpm >= 110 && wpm <= 160) {
+        pacingStatus = 'Excellent'
+        pacingColor = '#16a34a'
+        pacingTip = 'Great job! Your speaking rate is perfectly conversational and clear.'
+      } else if (wpm > 160) {
+        pacingStatus = 'Too Fast'
+        pacingColor = '#dc2626'
+        pacingTip = 'You are speaking a bit fast. Try to slow down, enunciate, and insert natural pauses.'
+      } else {
+        pacingStatus = 'Too Slow'
+        pacingColor = '#ea580c'
+        pacingTip = 'Speaking rate is a bit slow. Try to speak a bit more dynamically to keep engagement.'
+      }
+    }
+
+    return (
+      <div style={{ maxWidth: 1024, margin: '0 auto' }}>
+        <PageHeader title="🏆 Interview Complete" onBack={() => { setStage('setup'); setMessages([]); setFinalFeedback('') }} />
+        
+        {/* Dashboard Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 20, marginBottom: 20 }}>
+          {/* Card 1: Score breakdown radar chart */}
+          <div style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 16, padding: '24px', display: 'flex', flexDirection: 'column' }}>
+            <h3 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 16, color: 'var(--text-primary)', marginBottom: 4 }}>📈 Performance Breakdown</h3>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>Radar representation of your scored categories (/100%)</p>
+            
+            <div style={{ width: '100%', height: 220, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart cx="50%" cy="50%" outerRadius="75%" data={chartData}>
+                  <PolarGrid stroke="#e5e7eb" />
+                  <PolarAngleAxis dataKey="subject" tick={{ fill: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }} />
+                  <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} />
+                  <Radar name="Candidate" dataKey="score" stroke="var(--purple-primary)" fill="var(--purple-soft)" fillOpacity={0.6} />
+                  <Tooltip formatter={(value) => [`${value}%`, 'Score']} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 10, marginTop: 12, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>
+              {Object.entries(scores).map(([cat, val]) => (
+                <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 8px', background: '#f9fafb', borderRadius: 8 }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)' }}>{cat}</span>
+                  <strong style={{ fontSize: 13, color: 'var(--purple-primary)' }}>{val}/10</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Card 2: Voice Diagnostics & Speech Pacing */}
+          <div style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 16, padding: '24px', display: 'flex', flexDirection: 'column' }}>
+            <h3 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 16, color: 'var(--text-primary)', marginBottom: 4 }}>🎙️ Speech Pacing & Diagnostics</h3>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>Analytics collected from your voice-recording sessions</p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, flex: 1, justifyContent: 'center' }}>
+              {/* WPM Speed */}
+              <div style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '14px', borderRadius: 12, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                <div style={{ fontSize: 28 }}>⚡</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>Speaking Speed</div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                    <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)' }}>{wpm}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>WPM (Words/Min)</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 700, color: pacingColor, background: pacingColor + '15', padding: '2px 8px', borderRadius: 6 }}>{pacingStatus}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filler words count */}
+              <div style={{ display: 'flex', gap: 14, alignItems: 'center', padding: '14px', borderRadius: 12, background: '#fdf2f8', border: '1px solid #fbcfe8' }}>
+                <div style={{ fontSize: 28 }}>🤫</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>Filler Words Used</div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                    <span style={{ fontSize: 20, fontWeight: 800, color: '#be185d' }}>{interviewStats.fillerCount}</span>
+                    <span style={{ fontSize: 11, color: '#db2777', fontWeight: 600, marginLeft: 4 }}>fillers detected</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ padding: '12px', borderRadius: 8, background: '#f8fafc', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                💡 <strong>Pacing Tip:</strong> {pacingTip}
+                {interviewStats.fillerCount > 0 && <div style={{ marginTop: 6, borderTop: '1px solid #e2e8f0', paddingTop: 6 }}>Avoid using filler words like <em>"um"</em>, <em>"like"</em>, or <em>"you know"</em>. Pausing silently for a second is much more professional.</div>}
+              </div>
+            </div>
           </div>
         </div>
-        <AIText text={finalFeedback} />
-      </div>
-      <div style={{ display: 'flex', gap: 10 }}>
-        <Btn onClick={() => { setStage('setup'); setMessages([]); setFinalFeedback('') }}>🔄 Try Again</Btn>
-        <Btn outline onClick={onBack}>← Back</Btn>
-      </div>
-    </div>
-  )
 
-  return (
-    <div className="responsive-chat-height">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexShrink: 0 }}>
-        <div style={{ width: 10, height: 10, borderRadius: 999, background: '#22c55e', boxShadow: '0 0 0 3px #dcfce7' }} />
-        <span style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>Live — {form.company} · {form.role}</span>
-        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text-muted)', background: '#f3f4f6', padding: '3px 12px', borderRadius: 999, fontWeight: 600 }}>Q {Math.min(qCount, form.rounds)}/{form.rounds}</span>
+        {/* Detailed AI Performance Review text */}
+        <div style={{ background: 'linear-gradient(135deg, #ede9fe, #f5f3ff)', border: '1.5px solid var(--purple-soft)', borderRadius: 16, padding: '28px', marginBottom: 20 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid rgba(108,60,225,0.15)' }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--purple-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🤖</div>
+            <div>
+              <div style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 17, color: 'var(--text-primary)' }}>Performance Review</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{form.company} · {form.role} · {form.rounds} questions</div>
+            </div>
+          </div>
+          <AIText text={finalFeedback} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Btn onClick={() => { setStage('setup'); setMessages([]); setFinalFeedback('') }}>🔄 Try Again</Btn>
+          <Btn outline onClick={onBack}>← Back</Btn>
+        </div>
       </div>
+    )
+  }
+
+  const isTechnicalRound = form.focus === 'Technical Core Only'
+
+  const chatPanel = (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Chat scrollable box */}
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, padding: '20px', background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: '16px 16px 0 0' }}>
         {messages.map((m, i) => (
           <div key={i} style={{ display: 'flex', gap: 10, flexDirection: m.role === 'user' ? 'row-reverse' : 'row', alignItems: 'flex-start' }}>
@@ -624,19 +1059,33 @@ Format: feedback on answer (if any), then next question. Keep it professional an
         )}
         <div ref={chatEndRef} />
       </div>
+
       {/* Input bar */}
       <div style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderTop: '1px solid #f3f4f6', borderRadius: '0 0 16px 16px', flexShrink: 0 }}>
         {/* Voice mode toggle bar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px 0 16px', borderBottom: '1px solid #f3f4f6' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px 0 16px', borderBottom: '1px solid #f3f4f6', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Mode:</span>
           {[['text','✏️ Text'], ['voice','🎙️ Voice']].map(([m, label]) => (
-            <button key={m} onClick={() => { setVoiceMode(m === 'voice'); window.speechSynthesis?.cancel(); recognitionRef.current?.stop(); setListening(false) }}
+            <button key={m} onClick={() => { setVoiceMode(m === 'voice'); window.speechSynthesis?.cancel(); recognitionRef.current?.stop(); setListening(false); setAiSpeaking(false) }}
               style={{ padding: '3px 12px', borderRadius: 999, border: '1.5px solid', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
                 borderColor: (voiceMode ? 'voice' : 'text') === m ? 'var(--purple-primary)' : 'var(--card-border)',
                 background:  (voiceMode ? 'voice' : 'text') === m ? 'var(--purple-xsoft)' : '#fff',
                 color:       (voiceMode ? 'voice' : 'text') === m ? 'var(--purple-primary)' : 'var(--text-muted)',
               }}>{label}</button>
           ))}
+          
+          {voiceMode && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 12 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Accent:</span>
+              <select value={speechLang} onChange={e => setSpeechLang(e.target.value)}
+                style={{ padding: '3px 8px', borderRadius: 8, border: '1.5px solid var(--card-border)', fontSize: 11.5, fontWeight: 600, outline: 'none', cursor: 'pointer', background: '#fff', color: 'var(--text-primary)' }}>
+                <option value="en-IN">English (India)</option>
+                <option value="en-US">English (US)</option>
+                <option value="en-GB">English (UK)</option>
+              </select>
+            </div>
+          )}
+
           {voiceMode && <span style={{ marginLeft: 'auto', fontSize: 11.5, color: '#6b7280' }}>AI will speak responses · Mic fills input field</span>}
         </div>
 
@@ -645,7 +1094,7 @@ Format: feedback on answer (if any), then next question. Keep it professional an
           <textarea value={input} onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }}}
             rows={2} disabled={loading}
-            placeholder={voiceMode ? 'Click 🎙️ to speak, or type your answer...' : 'Type your answer... (Enter to send)'}
+            placeholder={listening ? 'Listening... Speak now.' : (voiceMode ? 'Click 🎙️ to speak, or type your answer...' : 'Type your answer... (Enter to send)')}
             style={{ flex: 1, padding: '10px 14px', border: '1.5px solid var(--card-border)', borderRadius: 12, fontSize: 14, fontFamily: 'inherit', resize: 'none', outline: 'none', color: 'var(--text-primary)', background: loading ? '#f9fafb' : '#fff' }}
             onFocus={e => e.target.style.borderColor = 'var(--purple-primary)'}
             onBlur={e => e.target.style.borderColor = 'var(--card-border)'}
@@ -669,9 +1118,160 @@ Format: feedback on answer (if any), then next question. Keep it professional an
             }}>↑</button>
         </div>
       </div>
+    </div>
+  )
+
+  const compilerPanel = isTechnicalRound && (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#1e1e2e', borderRadius: 16, border: '1.5px solid #2d2d3f', height: '100%', overflow: 'hidden' }}>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#16162a', borderBottom: '1px solid #2d2d3f', flexShrink: 0, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 5 }}>
+          {['#ff5f57','#ffbd2e','#28ca41'].map((c, i) => <div key={i} style={{ width: 10, height: 10, borderRadius: 999, background: c }} />)}
+        </div>
+        <span style={{ fontSize: 11, color: '#6b7280', fontFamily: 'monospace', marginLeft: 4 }}>
+          sandbox.{COMPILER_LANGUAGES.find(l => l.id === compilerLang)?.ext}
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+          {COMPILER_LANGUAGES.map(l => (
+            <button key={l.id} onClick={() => { setCompilerLang(l.id); setCompilerOutput(null) }}
+              style={{ padding: '2px 7px', borderRadius: 6, border: '1px solid', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10, fontWeight: 700, transition: 'all 0.15s',
+                borderColor: compilerLang === l.id ? l.color : '#2d2d3f',
+                background:  compilerLang === l.id ? l.color + '22' : 'transparent',
+                color:       compilerLang === l.id ? l.color : '#6b7280',
+              }}>
+              {l.icon} {l.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Code Area */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+        <textarea
+          value={compilerCode}
+          onChange={e => setCompilerCode(e.target.value)}
+          spellCheck={false}
+          style={{ width: '100%', height: '100%', padding: '14px', background: '#1e1e2e', color: '#cdd6f4', border: 'none', outline: 'none', fontFamily: 'monospace', fontSize: 13, lineHeight: '1.6', resize: 'none' }}
+        />
+      </div>
+
+      {/* Action Bar */}
+      <div style={{ display: 'flex', gap: 8, padding: '8px 14px', background: '#16162a', borderTop: '1px solid #2d2d3f', flexShrink: 0, alignItems: 'center' }}>
+        <button onClick={() => { setCompilerCodeMap(prev => ({ ...prev, [compilerLang]: DEFAULT_CODE[compilerLang] })); setCompilerOutput(null) }}
+          style={{ padding: '5px 12px', borderRadius: 7, border: '1px solid #2d2d3f', background: 'transparent', color: '#6b7280', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
+          Reset
+        </button>
+        <span style={{ flex: 1, fontSize: 10.5, color: '#3d3d5c' }}>Ctrl+Enter to run</span>
+        <button onClick={handleCompilerRun} disabled={compilerRunning}
+          style={{ padding: '6px 16px', borderRadius: 8, border: 'none', cursor: compilerRunning ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 700, transition: 'all 0.2s', background: compilerRunning ? '#2d2d3f' : 'var(--purple-primary)', color: '#fff' }}>
+          {compilerRunning ? 'Running...' : '▶ Run Code'}
+        </button>
+      </div>
+
+      {/* Output terminal */}
+      <div style={{ height: 130, background: '#11111f', borderTop: '1px solid #1a1a2e', padding: '10px 14px', overflowY: 'auto', flexShrink: 0 }}>
+        <div style={{ fontSize: 9.5, color: '#3d3d5c', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1.2 }}>Output</div>
+        {compilerOutput === null
+          ? <div style={{ fontSize: 11.5, color: '#3d3d5c', fontFamily: 'monospace' }}>Click "Run Code" to compile...</div>
+          : <pre style={{ fontSize: 11.5, color: compilerOutput.success ? '#a6e3a1' : '#f38ba8', fontFamily: 'monospace', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{compilerOutput.output}</pre>
+        }
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="responsive-chat-height" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexShrink: 0 }}>
+        <div style={{ width: 10, height: 10, borderRadius: 999, background: '#22c55e', boxShadow: '0 0 0 3px #dcfce7' }} />
+        <span style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>Live — {form.company} · {form.role}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text-muted)', background: '#f3f4f6', padding: '3px 12px', borderRadius: 999, fontWeight: 600 }}>Q {Math.min(qCount, form.rounds)}/{form.rounds}</span>
+      </div>
+
+      {/* ── Voice mode active visualization bubble ── */}
+      {voiceMode && (
+        <div className="voice-visualizer-container" style={{
+          background: 'linear-gradient(135deg, #16162a 0%, #0c0c1e 100%)',
+          borderRadius: 14,
+          padding: '12px 20px',
+          marginBottom: 14,
+          border: '1.5px solid #2d2d3f',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          boxShadow: '0 8px 32px rgba(108, 60, 225, 0.08)',
+          flexShrink: 0
+        }}>
+          {/* Status Indicator */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{
+                width: 8, height: 8, borderRadius: 999,
+                background: listening ? '#dc2626' : (aiSpeaking ? '#22c55e' : '#6b7280'),
+                boxShadow: (listening || aiSpeaking) ? `0 0 8px ${listening ? '#dc2626' : '#22c55e'}` : 'none',
+                transition: 'all 0.3s'
+              }} />
+              <span style={{ fontSize: 11, fontWeight: 800, color: listening ? '#f38ba8' : (aiSpeaking ? '#a6e3a1' : '#b4befe'), fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                {listening ? 'Listening (Speak Now)' : (aiSpeaking ? 'AI Speaking' : 'Voice Mode Standby')}
+              </span>
+            </div>
+            <span style={{ fontSize: 10.5, color: '#949cbb' }}>
+              {listening ? 'Your speech is being transcribed...' : (aiSpeaking ? 'Listen to the interview questions' : 'Click the microphone or type to reply')}
+            </span>
+          </div>
+
+          {/* Neon Soundwave visualizer */}
+          <div style={{ flex: 1, display: 'flex', gap: 4, height: 28, alignItems: 'center', justifyContent: 'center' }}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(i => {
+              const isActive = aiSpeaking || listening
+              return (
+                <div key={i} className={`voice-bar-${i} ${isActive ? 'voice-bar--pulse' : ''}`} style={{
+                  width: 3,
+                  height: isActive ? '100%' : '15%',
+                  background: listening ? 'linear-gradient(to top, #f38ba8, #e78284)' : 'linear-gradient(to top, #7c3aed, #db2777)',
+                  borderRadius: 999,
+                  transition: 'height 0.15s ease'
+                }} />
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Split screen content area */}
+      <div style={{ flex: 1, display: 'flex', gap: isTechnicalRound ? 16 : 0, overflow: 'hidden', minHeight: 0 }}>
+        {chatPanel}
+        {compilerPanel}
+      </div>
+
       <style>{`
         @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
         @keyframes micPulse{0%,100%{box-shadow:0 0 0 4px rgba(239,68,68,0.2)}50%{box-shadow:0 0 0 8px rgba(239,68,68,0.1)}}
+        @keyframes voicePulse-1 { 0%, 100% { height: 15%; } 50% { height: 75%; } }
+        @keyframes voicePulse-2 { 0%, 100% { height: 20%; } 50% { height: 95%; } }
+        @keyframes voicePulse-3 { 0%, 100% { height: 10%; } 50% { height: 85%; } }
+        .voice-bar-1.voice-bar--pulse { animation: voicePulse-1 0.6s infinite ease-in-out; }
+        .voice-bar-2.voice-bar--pulse { animation: voicePulse-2 0.8s infinite ease-in-out 0.1s; }
+        .voice-bar-3.voice-bar--pulse { animation: voicePulse-3 0.7s infinite ease-in-out 0.2s; }
+        .voice-bar-4.voice-bar--pulse { animation: voicePulse-1 0.6s infinite ease-in-out 0.3s; }
+        .voice-bar-5.voice-bar--pulse { animation: voicePulse-2 0.8s infinite ease-in-out 0.15s; }
+        .voice-bar-6.voice-bar--pulse { animation: voicePulse-3 0.7s infinite ease-in-out 0.25s; }
+        .voice-bar-7.voice-bar--pulse { animation: voicePulse-1 0.6s infinite ease-in-out 0.05s; }
+        .voice-bar-8.voice-bar--pulse { animation: voicePulse-2 0.8s infinite ease-in-out 0.2s; }
+        .voice-bar-9.voice-bar--pulse { animation: voicePulse-3 0.7s infinite ease-in-out 0.1s; }
+        .voice-bar-10.voice-bar--pulse { animation: voicePulse-1 0.6s infinite ease-in-out 0.35s; }
+        .voice-bar-11.voice-bar--pulse { animation: voicePulse-2 0.8s infinite ease-in-out 0.15s; }
+        .voice-bar-12.voice-bar--pulse { animation: voicePulse-3 0.7s infinite ease-in-out 0.3s; }
+        @media (max-width: 520px) {
+          .voice-visualizer-container {
+            flex-direction: column !important;
+            align-items: center !important;
+            text-align: center !important;
+            gap: 12px !important;
+          }
+          .voice-visualizer-container > div {
+            align-items: center !important;
+          }
+        }
       `}</style>
     </div>
   )
@@ -759,9 +1359,21 @@ Give a detailed evaluation:
             lastInterviewDate:   new Date(),
             placementReadiness:  newReadiness,
           }).catch(() => {})
+
+          // Write to interviews collection for institutional admin analytics
+          addDoc(collection(db, 'interviews'), {
+            uid: user.uid,
+            studentName: profile?.name || user.displayName || user.email.split('@')[0],
+            studentEmail: user.email,
+            branch: profile?.branch || 'CSE',
+            category: form.company + ' - ' + form.role,
+            score: Math.round(parsed / 10), // out of 10
+            feedback: result.slice(0, 1500), // store up to 1500 chars of detailed feedback
+            createdAt: serverTimestamp()
+          }).catch(() => {})
         } catch (_) {}
       }
-    } catch { setScoreResult('Failed to generate score. Please try again.') }
+    } catch (err) { setScoreResult(`Failed to generate score: ${err.message || 'Please wait 10-15 seconds and try again.'}`) }
     setLoadingScore(false)
   }
 
@@ -771,7 +1383,7 @@ Give a detailed evaluation:
     <div>
       <PageHeader title="📋 Scored Mock Test" subtitle="Answer all questions, then get a detailed score and feedback" onBack={onBack} />
       <div style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 16, padding: '28px', maxWidth: 560 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 22 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 16, marginBottom: 22 }}>
           <SelectField label="Company *" value={form.company} onChange={v => setForm(f => ({ ...f, company: v }))} options={COMPANIES} placeholder="Select" />
           <SelectField label="Branch *" value={form.dept} onChange={v => setForm(f => ({ ...f, dept: v, role: '' }))} options={DEPARTMENTS} placeholder="Select" />
           <SelectField label="Role *" value={form.role} onChange={v => setForm(f => ({ ...f, role: v }))} options={ROLES[form.dept] || []} placeholder={form.dept ? 'Select role' : 'Pick branch first'} />
@@ -866,7 +1478,7 @@ function AttendHome({ onBack }) {
   return (
     <div>
       <PageHeader title="🎤 Attend Interview" subtitle="Choose how you want to practice" onBack={onBack} />
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, maxWidth: 720 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 18, maxWidth: 720 }}>
         {/* Live card */}
         <div onClick={() => setSub('live')} style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 18, padding: '28px 24px', cursor: 'pointer', transition: 'all 0.22s', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--purple-primary)'; e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 10px 28px rgba(108,60,225,0.12)' }}
@@ -917,7 +1529,7 @@ export default function AIInterview() {
 
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, maxWidth: 820, marginBottom: 36 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 20, maxWidth: 820, marginBottom: 36 }}>
         {/* Prepare */}
         <div onClick={() => setMode('prepare')} style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 20, padding: '32px 28px', cursor: 'pointer', transition: 'all 0.25s', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--purple-primary)'; e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 36px rgba(108,60,225,0.13)' }}
@@ -954,7 +1566,7 @@ export default function AIInterview() {
       {/* How it works */}
       <div style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 16, padding: '24px 28px' }}>
         <div style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 800, fontSize: 16, color: 'var(--text-primary)', marginBottom: 18 }}>⚡ What happens in each mode</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 20 }}>
           {[
             { icon: '📚', title: 'Prepare', steps: ['Select company, branch, role', `AI quizzes you (${QUIZ_COUNT} quick questions)`, 'AI builds personalised prep plan', 'Topics, likely Qs, 7-day schedule'] },
             { icon: '🎤', title: 'Attend', steps: ['Choose Live or Scored Mock', 'For Live: answer one Q at a time', 'For Scored: answer all 8 Qs, then submit', 'Get score, feedback, and improvement tips'] },
@@ -976,4 +1588,32 @@ export default function AIInterview() {
       </div>
     </div>
   )
+}
+
+// ── Helper to parse individual scores from final AI feedback ──
+export function parseCategoryScores(text) {
+  const categories = {
+    Communication: 5,
+    Technical: 5,
+    Confidence: 5,
+    Overall: 5
+  }
+
+  if (!text) return categories
+
+  const patterns = {
+    Communication: /(?:Communication|Comm)\s*(?:Score)?:?\s*(\d+(?:\.\d+)?)\s*\/\s*10/i,
+    Technical: /(?:Technical|Tech|Technical Depth)\s*(?:Score)?:?\s*(\d+(?:\.\d+)?)\s*\/\s*10/i,
+    Confidence: /(?:Confidence|Conf)\s*(?:Score)?:?\s*(\d+(?:\.\d+)?)\s*\/\s*10/i,
+    Overall: /(?:Overall|Overall Score)\s*:?\s*(\d+(?:\.\d+)?)\s*\/\s*10/i
+  }
+
+  for (const [key, regex] of Object.entries(patterns)) {
+    const match = text.match(regex)
+    if (match) {
+      categories[key] = Math.min(10, Math.max(0, parseFloat(match[1])))
+    }
+  }
+
+  return categories
 }

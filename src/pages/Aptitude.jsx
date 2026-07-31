@@ -4,6 +4,8 @@ import { doc, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { computeReadiness } from '../utils/readiness.js'
 import { Sparkles, Bot, Loader2 } from 'lucide-react'
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
+import { getUnlockedBadges } from '../utils/badges.js'
 
 // ─── Helpers ─────────────────────────────────────────────────────
 function shuffle(arr) {
@@ -18,6 +20,94 @@ function shuffle(arr) {
 function sampleQuestions(pool, n = 8) {
   if (pool.length <= n) return pool
   return shuffle(pool).slice(0, n)
+}
+
+function triggerConfetti() {
+  const canvas = document.createElement('canvas');
+  canvas.style.position = 'fixed';
+  canvas.style.top = '0';
+  canvas.style.left = '0';
+  canvas.style.width = '100vw';
+  canvas.style.height = '100vh';
+  canvas.style.zIndex = '99999';
+  canvas.style.pointerEvents = 'none';
+  document.body.appendChild(canvas);
+
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  ctx.scale(dpr, dpr);
+
+  const colors = ['#7c3aed', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
+  const particles = [];
+  
+  for (let i = 0; i < 60; i++) {
+    particles.push({
+      x: 0,
+      y: window.innerHeight,
+      vx: Math.random() * 12 + 5,
+      vy: -Math.random() * 15 - 12,
+      size: Math.random() * 6 + 4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rotation: Math.random() * 360,
+      rotationSpeed: (Math.random() - 0.5) * 8,
+      opacity: 1
+    });
+  }
+
+  for (let i = 0; i < 60; i++) {
+    particles.push({
+      x: window.innerWidth,
+      y: window.innerHeight,
+      vx: -(Math.random() * 12 + 5),
+      vy: -Math.random() * 15 - 12,
+      size: Math.random() * 6 + 4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rotation: Math.random() * 360,
+      rotationSpeed: (Math.random() - 0.5) * 8,
+      opacity: 1
+    });
+  }
+
+  let animationId;
+  function update() {
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    let alive = false;
+
+    particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.4;
+      p.vx *= 0.98;
+      p.rotation += p.rotationSpeed;
+      
+      if (p.y > window.innerHeight) {
+        p.opacity -= 0.025;
+      }
+      
+      if (p.opacity > 0) {
+        alive = true;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate((p.rotation * Math.PI) / 180);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.opacity;
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+        ctx.restore();
+      }
+    });
+
+    if (alive) {
+      animationId = requestAnimationFrame(update);
+    } else {
+      if (canvas.parentNode) {
+        document.body.removeChild(canvas);
+      }
+    }
+  }
+
+  update();
 }
 
 // ─── Question Bank ───────────────────────────────────────────────
@@ -35,7 +125,7 @@ const QUESTIONS = {
     // ── New Easy questions ──
     { id: 'q9',  difficulty: 'Easy',   q: 'What is 15% of 200?', options: ['25', '30', '35', '40'], ans: 1, explanation: '15/100 × 200 = 30' },
     { id: 'q10', difficulty: 'Easy',   q: 'A number is increased by 20% and then decreased by 20%. The net change is?', options: ['0%', '+4%', '−4%', '+2%'], ans: 2, explanation: 'Net = 1.2 × 0.8 = 0.96, so −4% change.' },
-    { id: 'q11', difficulty: 'Easy',   q: 'What is the simple interest on ₹5000 at 6% per annum for 3 years?', options: ['₹800', '₹900', '₹1000', '₹900'], ans: 1, explanation: 'SI = (5000 × 6 × 3) / 100 = ₹900' },
+    { id: 'q11', difficulty: 'Easy',   q: 'What is the simple interest on ₹5000 at 6% per annum for 3 years?', options: ['₹800', '₹900', '₹1000', '₹1100'], ans: 1, explanation: 'SI = (5000 × 6 × 3) / 100 = ₹900' },
     { id: 'q12', difficulty: 'Easy',   q: 'If the speed of a car is 60 km/h, how long does it take to cover 150 km?', options: ['2 hrs', '2.5 hrs', '3 hrs', '1.5 hrs'], ans: 1, explanation: 'Time = Distance / Speed = 150/60 = 2.5 hours' },
     { id: 'q13', difficulty: 'Easy',   q: 'A box contains 5 red and 3 blue balls. What is the probability of picking a red ball at random?', options: ['3/8', '5/8', '1/2', '2/5'], ans: 1, explanation: 'P(red) = 5 / (5+3) = 5/8' },
     { id: 'q14', difficulty: 'Easy',   q: 'The perimeter of a square is 48 cm. What is its area?', options: ['100 cm²', '128 cm²', '144 cm²', '196 cm²'], ans: 2, explanation: 'Side = 48/4 = 12 cm. Area = 12² = 144 cm²' },
@@ -50,6 +140,12 @@ const QUESTIONS = {
     { id: 'q21', difficulty: 'Hard',   q: 'Two trains of length 200 m and 150 m run on parallel tracks. When running in the same direction at 60 km/h and 90 km/h, time to pass each other is?', options: ['42 s', '50 s', '36 s', '60 s'], ans: 0, explanation: 'Relative speed = 30 km/h = 25/3 m/s. Total length = 350 m. Time = 350 / (25/3) = 42 s.' },
     { id: 'q22', difficulty: 'Hard',   q: 'A man can row 8 km/h in still water. If the river speed is 2 km/h, how long to row 24 km downstream and return?', options: ['6.25 hrs', '6.5 hrs', '7 hrs', '7.5 hrs'], ans: 0, explanation: 'Downstream speed = 10, upstream = 6. Time = 24/10 + 24/6 = 2.4 + 4 = 6.4 hrs ≈ 6.4. Closest = 6.25 ... actually 6.4 hrs; the question is designed with the exact answer among choices.' },
     { id: 'q23', difficulty: 'Hard',   q: 'If (x − 2)(x + 3) = 0 and (x + 3)(x − 5) = 0, what is the common value of x?', options: ['2', '3', '−3', '5'], ans: 2, explanation: 'x = 2 or −3 from first. x = −3 or 5 from second. Common = −3.' },
+    // ── High-Yield Placement Additions ──
+    { id: 'q24', difficulty: 'Medium', q: 'A is twice as efficient as B. If B can complete a work in 30 days, in how many days can they complete the work together?', options: ['10 days', '12 days', '15 days', '20 days'], ans: 0, explanation: 'A is twice as efficient as B, so A takes half the time B takes. A takes 15 days. Combined rate = 1/15 + 1/30 = 1/10. So they finish in 10 days.' },
+    { id: 'q25', difficulty: 'Medium', q: 'In what ratio must a grocer mix tea at ₹60 per kg and ₹65 per kg so that by selling the mixture at ₹68.20 per kg he may gain 10%?', options: ['3:2', '3:4', '3:5', '4:5'], ans: 0, explanation: 'Cost price of mixture = ₹68.20 / 1.1 = ₹62. By allegation rule: ratio = (Cost of dearer - Mean price) : (Mean price - Cost of cheaper) = (65 - 62) : (62 - 60) = 3:2.' },
+    { id: 'q26', difficulty: 'Hard',   q: 'A, B, and C invest in a business in the ratio 5:6:8. At the end of the year, they receive profits in the ratio 5:3:12. Find the ratio of time periods for which they invested.', options: ['2:1:3', '1:2:3', '2:1:4', '3:2:1'], ans: 0, explanation: 'Time = Profit / Investment. Ratio of times = 5/5 : 3/6 : 12/8 = 1 : 0.5 : 1.5 = 2:1:3.' },
+    { id: 'q27', difficulty: 'Medium', q: 'Find a single discount equivalent to successive discounts of 20%, 10%, and 5%.', options: ['35%', '31.6%', '32%', '30.5%'], ans: 1, explanation: 'Successive discount = 100 × (1 - 0.20) × (1 - 0.10) × (1 - 0.05) = 100 × 0.8 × 0.9 × 0.95 = 68.4. Equivalent discount = 100 − 68.4 = 31.6%.' },
+    { id: 'q28', difficulty: 'Hard',   q: 'Excluding stoppages, the speed of a bus is 54 km/h and including stoppages, it is 45 km/h. For how many minutes does the bus stop per hour?', options: ['9 minutes', '10 minutes', '12 minutes', '15 minutes'], ans: 1, explanation: 'Distance lost per hour = 54 - 45 = 9 km. Time stopped per hour = (Distance lost / Speed excluding stoppages) × 60 = (9/54) × 60 = 10 minutes.' },
   ],
 
   logical: [
@@ -77,6 +173,11 @@ const QUESTIONS = {
     // ── New Hard questions ──
     { id: 'l19', difficulty: 'Hard',   q: 'If P is the brother of Q, Q is the sister of R, R is the son of S, and S is the daughter of T, how is P related to T?', options: ['Grandson', 'Son', 'Nephew', 'Granddaughter'], ans: 0, explanation: 'S is daughter of T → S is female. R is son of S. Q is sister of R. P is brother of Q. So P is grandchild (male) of T = Grandson.' },
     { id: 'l20', difficulty: 'Hard',   q: '5 people A,B,C,D,E rank in an exam. B is not first. A is above C. D is below E. C is above D. E is above A. Who is first?', options: ['A', 'B', 'C', 'E'], ans: 3, explanation: 'E>A>C>D, B is not first. Placing B → E is 1st.' },
+    // ── High-Yield Placement Additions ──
+    { id: 'l21', difficulty: 'Medium', q: 'If 1st January 2007 was a Monday, what day of the week was 1st January 2008?', options: ['Monday', 'Tuesday', 'Wednesday', 'Sunday'], ans: 1, explanation: 'An ordinary year has 365 days = 52 weeks + 1 day. So, 1st Jan 2008 will be 1 day ahead of 1st Jan 2007, which is Tuesday.' },
+    { id: 'l22', difficulty: 'Hard',   q: "If 'A + B' means A is the son of B; 'A - B' means A is the husband of B; 'A * B' means A is the sister of B; what does 'P * Q + R' mean?", options: ['P is the sister of R', 'P is the daughter of R', 'P is the aunt of R', 'P is the mother of R'], ans: 1, explanation: "P * Q means P is sister of Q. Q + R means Q is son of R. Sister of R's son must be R's daughter. So P is daughter of R." },
+    { id: 'l23', difficulty: 'Medium', q: 'Statements: (1) All fruits are sweet. (2) No sweet thing is healthy. Conclusions: (I) No fruit is healthy. (II) Some sweet things are fruits. Which of the conclusions logically follow?', options: ['Only I follows', 'Only II follows', 'Both I and II follow', 'Neither follows'], ans: 2, explanation: "Since Fruits is a subset of Sweet, and Sweet has no overlap with Healthy, Fruits has no overlap with Healthy (No fruit is healthy is true). Since all fruits are sweet, sweet things that are fruits exist, so some sweet things are fruits is also true. Both follow." },
+    { id: 'l24', difficulty: 'Easy',   q: 'Find the missing letters in the series: SCD, TEF, UGH, ____, WKL', options: ['VIJ', 'VIK', 'VJK', 'UJI'], ans: 0, explanation: 'First letter increases by +1 (S->T->U->V->W). Second letter increases by +2 (C->E->G->I->K). Third letter increases by +2 (D->F->H->J->L). Therefore, the missing term is VIJ.' },
   ],
 
   verbal: [
@@ -104,6 +205,12 @@ const QUESTIONS = {
     // ── New Hard questions ──
     { id: 'v19', difficulty: 'Hard',   q: 'The word SESQUIPEDALIAN is used to describe:', options: ['A short sentence', 'Long words', 'Ancient Latin texts', 'Silent letters'], ans: 1, explanation: 'Sesquipedalian refers to long words, or the habit of using long words.' },
     { id: 'v20', difficulty: 'Hard',   q: 'Choose the best paraphrase: "The plenipotentiary negotiated the armistice."', options: ['A soldier ended the war.', 'A powerful diplomat negotiated a ceasefire.', 'A commander surrendered.', 'Peace was declared by the president.'], ans: 1, explanation: 'Plenipotentiary = fully authorised diplomat. Armistice = ceasefire agreement.' },
+    // ── High-Yield Placement Additions ──
+    { id: 'v21', difficulty: 'Easy',   q: 'Choose the word most similar in meaning to METICULOUS:', options: ['Careful', 'Sloppy', 'Rapid', 'Indifferent'], ans: 0, explanation: 'Meticulous means showing great attention to detail; precise. Careful is the closest synonym.' },
+    { id: 'v22', difficulty: 'Medium', q: 'Choose the ANTONYM of GARRULOUS:', options: ['Talkative', 'Verbose', 'Taciturn', 'Voluble'], ans: 2, explanation: 'Garrulous means talkative. Taciturn means quiet or reserved. So they are antonyms.' },
+    { id: 'v23', difficulty: 'Hard',   q: "Identify the error in: 'Neither of the candidates are qualified for the software developer position.'", options: ["'Neither of'", "'the candidates'", "'are qualified'", "'for the position'"], ans: 2, explanation: "The pronoun 'neither' is singular, so it must take the singular verb 'is qualified' instead of 'are qualified'." },
+    { id: 'v24', difficulty: 'Medium', q: "Fill the blanks: The speaker's ________ arguments failed to ________ the skeptical audience.", options: ['convoluted - convince', 'cogent - persuade', 'weak - ignore', 'verbose - silence'], ans: 1, explanation: "'Cogent' means logical and convincing; 'persuade' means to convince. This fits the structure of explaining what the arguments failed to do due to the audience's skepticism." },
+    { id: 'v25', difficulty: 'Easy',   q: "The idiom 'burn the midnight oil' means:", options: ['To waste fuel', 'To work or study late into the night', 'To complain about work', 'To wake up early'], ans: 1, explanation: 'The phrase refers to the historical practice of working by oil lamp late into the night.' },
   ],
 
   technical: [
@@ -142,6 +249,11 @@ const QUESTIONS = {
 
     // ── Speed, Distance, Time Advanced ──
     { id: 't20', difficulty: 'Hard',   q: 'A man goes from A to B at 40 km/h and returns at 60 km/h. What is his average speed for the entire journey?', options: ['50 km/h', '48 km/h', '52 km/h', '45 km/h'], ans: 1, explanation: 'Average speed = 2×40×60/(40+60) = 4800/100 = 48 km/h.' },
+    // ── High-Yield Placement Additions ──
+    { id: 't21', difficulty: 'Medium', q: 'From a pack of 52 cards, two cards are drawn together. What is the probability that both cards are kings?', options: ['1/221', '1/169', '2/221', '1/26'], ans: 0, explanation: 'P(2 Kings) = (4/52) × (3/51) = 12 / 2652 = 1 / 221.' },
+    { id: 't22', difficulty: 'Medium', q: "In how many different ways can the letters of the word 'LEADING' be arranged in such a way that the vowels always come together?", options: ['720', '1440', '360', '5040'], ans: 0, explanation: 'Group the vowels EAI as 1 unit. Together with the consonants L, D, N, G, we have 5 units to arrange, which can be done in 5! = 120 ways. Within the unit, the vowels EAI can be arranged in 3! = 6 ways. Total arrangements = 120 × 6 = 720.' },
+    { id: 't23', difficulty: 'Hard',   q: 'At what angle are the hands of a clock inclined at 15 minutes past 5?', options: ['60°', '67.5°', '58.5°', '72.5°'], ans: 1, explanation: 'Angle = |30H - 5.5M| where H=5, M=15. Angle = |30(5) - 5.5(15)| = |150 - 82.5| = 67.5°.' },
+    { id: 't24', difficulty: 'Hard',   q: 'If the number 97215X6 is completely divisible by 11, what is the value of digit X?', options: ['1', '2', '3', '5'], ans: 2, explanation: 'For a number to be divisible by 11, the difference between the sum of digits at odd positions and the sum of digits at even positions must be divisible by 11. Odd sum = 9+2+5+6 = 22. Even sum = 7+1+X = 8+X. Difference = 22 − (8+X) = 14 − X. For this to be divisible by 11, X must be 3.' },
   ],
 }
 
@@ -203,7 +315,7 @@ function QuestionCard({ q, index, submitted, userAnswer, onAnswer }) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      <div className="aptitude-options-grid">
         {q.options.map((opt, i) => {
           let bg = '#f9fafb', border = '#e5e7eb', color = 'var(--text-primary)'
           if (submitted) {
@@ -275,6 +387,10 @@ function PracticeSection({ sectionId, onBack }) {
     setSubmitted(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
 
+    if (s === activeQuestions.length) {
+      triggerConfetti()
+    }
+
     // ── Write to Firestore ──────────────────────────────────────
     if (user) {
       try {
@@ -286,17 +402,46 @@ function PracticeSection({ sectionId, onBack }) {
         const prevSectionBest = profile?.sectionScores?.[sectionId] ?? 0
         const newSectionScore = Math.max(prevSectionBest, pct)
 
+        const historyEntry = {
+          date: new Date(),
+          score: pct,
+          sectionId
+        }
+        const currentHistory = profile?.aptitudeHistory || []
+        const newHistory = [historyEntry, ...currentHistory].slice(0, 15)
+
         const newReadiness = computeReadiness({
           aptitudeScore:      newAptitudeScore,
           mockInterviewScore: profile?.mockInterviewScore ?? 0,
           currentStreak:      profile?.currentStreak ?? 0,
           codingScore:        profile?.codingScore ?? 0,
         })
+
+        // Evaluate badge unlocks
+        const updatedProfileMock = {
+          ...profile,
+          aptitudeScore: newAptitudeScore,
+          sectionScores: {
+            ...profile?.sectionScores,
+            [sectionId]: newSectionScore
+          }
+        }
+        const prevBadges = profile?.unlockedBadges || []
+        const currentUnlocked = getUnlockedBadges(updatedProfileMock)
+        const newlyUnlocked = currentUnlocked.filter(b => !prevBadges.includes(b))
+        const finalUnlocked = [...prevBadges, ...newlyUnlocked]
+
+        if (newlyUnlocked.length > 0) {
+          window.dispatchEvent(new CustomEvent('placeonix-badge-unlocked', { detail: { badgeIds: newlyUnlocked } }))
+        }
+
         updateDoc(doc(db, 'users', user.uid), {
           aptitudeScore:       newAptitudeScore,
           placementReadiness:  newReadiness,
           lastAptitudeAttempt: new Date(),
           [`sectionScores.${sectionId}`]: newSectionScore,
+          aptitudeHistory:     newHistory,
+          unlockedBadges:      finalUnlocked
         }).catch(() => {})
       } catch (_) {}
     }
@@ -436,11 +581,61 @@ function MockTest({ onBack }) {
   const [score, setScore]       = useState(null)
   const [timeLeft, setTimeLeft] = useState(TOTAL_SECONDS)
 
+  const { user, profile } = useAuth()
   const handleSubmit = useCallback(() => {
     const s = allQ.reduce((acc, q) => acc + (answers[q.id + q.q.slice(0, 3)] === q.ans ? 1 : 0), 0)
     setScore(s)
     setSubmitted(true)
-  }, [answers, allQ])
+
+    if (s === allQ.length) {
+      triggerConfetti()
+    }
+
+    if (user) {
+      try {
+        const pct = Math.round((s / allQ.length) * 100)
+        const prevBest = profile?.aptitudeScore ?? 0
+        const newAptitudeScore = Math.max(prevBest, pct)
+
+        const historyEntry = {
+          date: new Date(),
+          score: pct,
+          sectionId: 'mock_test'
+        }
+        const currentHistory = profile?.aptitudeHistory || []
+        const newHistory = [historyEntry, ...currentHistory].slice(0, 15)
+
+        const newReadiness = computeReadiness({
+          aptitudeScore:      newAptitudeScore,
+          mockInterviewScore: profile?.mockInterviewScore ?? 0,
+          currentStreak:      profile?.currentStreak ?? 0,
+          codingScore:        profile?.codingScore ?? 0,
+        })
+
+        // Evaluate badge unlocks
+        const updatedProfileMock = {
+          ...profile,
+          aptitudeScore: newAptitudeScore
+        }
+        const prevBadges = profile?.unlockedBadges || []
+        const currentUnlocked = getUnlockedBadges(updatedProfileMock)
+        const newlyUnlocked = currentUnlocked.filter(b => !prevBadges.includes(b))
+        const finalUnlocked = [...prevBadges, ...newlyUnlocked]
+
+        if (newlyUnlocked.length > 0) {
+          window.dispatchEvent(new CustomEvent('placeonix-badge-unlocked', { detail: { badgeIds: newlyUnlocked } }))
+        }
+
+        updateDoc(doc(db, 'users', user.uid), {
+          aptitudeScore:       newAptitudeScore,
+          placementReadiness:  newReadiness,
+          lastAptitudeAttempt: new Date(),
+          aptitudeHistory:     newHistory,
+          unlockedBadges:      finalUnlocked
+        }).catch(() => {})
+      } catch (_) {}
+    }
+  }, [answers, allQ, user, profile])
 
   useEffect(() => {
     if (submitted) return
@@ -646,6 +841,23 @@ export default function Aptitude() {
   if (active) return <PracticeSection sectionId={active} onBack={() => setActive(null)} />
 
   const totalQ = Object.values(QUESTIONS).reduce((sum, arr) => sum + arr.length, 0)
+  const recentHistory = profile?.aptitudeHistory || []
+  
+  const chartData = [...recentHistory].slice(0, 10).reverse().map((h, i) => {
+    let dateStr = ''
+    if (h.date) {
+      const d = h.date.toDate ? h.date.toDate() : new Date(h.date)
+      dateStr = d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })
+    }
+    return {
+      name: `Attempt ${i + 1}`,
+      score: h.score,
+      date: dateStr,
+      section: h.sectionId ? (h.sectionId === 'mock_test' ? 'Mock Test' : h.sectionId.toUpperCase()) : ''
+    }
+  })
+
+  const sScores = profile?.sectionScores || {}
 
   return (
     <div>
@@ -659,7 +871,7 @@ export default function Aptitude() {
       </div>
 
       {/* Stats */}
-      <div style={{ display: 'flex', gap: 14, marginBottom: 28 }}>
+      <div className="aptitude-stats-grid" style={{ marginBottom: 28 }}>
         {[
           { icon: '📚', label: 'Total Questions', value: `${totalQ}+`, color: '#ede9fe' },
           { icon: '🎯', label: 'Topics', value: '4 Core Sections', color: '#dbeafe' },
@@ -674,8 +886,95 @@ export default function Aptitude() {
         ))}
       </div>
 
+      {/* Visual Analytics & Heatmap Dashboard */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 20, marginBottom: 28 }}>
+        {/* Panel 1: Timeline chart */}
+        <div style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 16, padding: '20px 24px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <h3 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 15.5, color: 'var(--text-primary)', margin: 0 }}>📈 Accuracy Progress Timeline</h3>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--purple-primary)', background: 'var(--purple-soft)', padding: '2px 8px', borderRadius: 6 }}>Last 10 attempts</span>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>Tracking your percentage scores over time</p>
+          
+          {chartData.length > 0 ? (
+            <div style={{ width: '100%', height: 175 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="scoreColor" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--purple-primary)" stopOpacity={0.25}/>
+                      <stop offset="95%" stopColor="var(--purple-primary)" stopOpacity={0.0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 9.5, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 9.5, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
+                  <Tooltip 
+                    contentStyle={{ background: '#1e1e2e', border: 'none', borderRadius: 8, color: '#fff', fontSize: 12 }}
+                    labelStyle={{ display: 'none' }}
+                    formatter={(val, name, props) => [`${val}%`, `${props.payload.section} - Score`]} 
+                  />
+                  <Area type="monotone" dataKey="score" stroke="var(--purple-primary)" strokeWidth={2} fillOpacity={1} fill="url(#scoreColor)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '28px 0', border: '1px dashed var(--card-border)', borderRadius: 12 }}>
+              <span style={{ fontSize: 26, marginBottom: 8 }}>📊</span>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontWeight: 600 }}>No test data recorded yet.</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Complete a quiz to plot your accuracy timeline.</span>
+            </div>
+          )}
+        </div>
+
+        {/* Panel 2: Strengths & Weaknesses Heatmap Grid */}
+        <div style={{ background: '#fff', border: '1.5px solid var(--card-border)', borderRadius: 16, padding: '20px 24px', display: 'flex', flexDirection: 'column' }}>
+          <h3 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 15.5, color: 'var(--text-primary)', marginBottom: 4 }}>🎯 Section Accuracy Diagnostics</h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>Live breakdown of strengths and critical review areas</p>
+          
+          <div className="aptitude-diagnostics-grid">
+            {SECTION_META.map(s => {
+              const score = sScores[s.id] ?? 0
+              let badgeText = 'Unstarted'
+              let badgeBg = '#f3f4f6'
+              let badgeColor = '#6b7280'
+              
+              if (sScores[s.id] !== undefined) {
+                if (score >= 75) {
+                  badgeText = 'Strength'
+                  badgeBg = '#dcfce7'
+                  badgeColor = '#16a34a'
+                } else if (score >= 50) {
+                  badgeText = 'Average'
+                  badgeBg = '#fef3c7'
+                  badgeColor = '#d97706'
+                } else {
+                  badgeText = 'Weakness'
+                  badgeBg = '#fee2e2'
+                  badgeColor = '#dc2626'
+                }
+              }
+              
+              return (
+                <div key={s.id} style={{ display: 'flex', flexDirection: 'column', padding: '12px 14px', borderRadius: 12, border: '1px solid var(--card-border)', background: '#fafafa', position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontSize: 16 }}>{s.icon}</span>
+                    <span style={{ fontSize: 9.5, fontWeight: 800, padding: '2px 7px', borderRadius: 6, background: badgeBg, color: badgeColor, textTransform: 'uppercase', letterSpacing: 0.5 }}>{badgeText}</span>
+                  </div>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>{s.label}</span>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                    <span style={{ fontSize: 20, fontWeight: 900, color: s.color, fontFamily: 'Urbanist, sans-serif' }}>{score}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>% Accuracy</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
       {/* Section cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: 16, marginBottom: 20 }}>
         {SECTION_META.map(s => {
           const bestPct = profile?.sectionScores?.[s.id] ?? null
           return (
@@ -802,7 +1101,7 @@ export default function Aptitude() {
         <div style={{ fontWeight: 800, fontFamily: 'Urbanist, sans-serif', fontSize: 15, color: '#92400e', marginBottom: 10 }}>
           💡 Preparation Tips
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 220px), 1fr))', gap: 8 }}>
           {[
             'Practice IndiaBix daily for aptitude',
             'Learn shortcut formulas for quant',

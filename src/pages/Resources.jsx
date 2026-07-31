@@ -14,7 +14,9 @@ import {
   HelpCircle,
   ChevronDown,
   ChevronUp,
-  CheckCircle2
+  CheckCircle2,
+  Sparkles,
+  Loader2
 } from 'lucide-react'
 import { PLACEMENT_PREP_DATA } from '../data/placementPrepData'
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore'
@@ -253,6 +255,93 @@ export default function Resources() {
   const [activeTab, setActiveTab] = useState('resources') // 'resources' | 'syllabus'
   const [expandedQuestions, setExpandedQuestions] = useState({})
 
+  // AI Placement Resource Advisor State
+  const [aiQuery, setAiQuery] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiResults, setAiResults] = useState([])
+  const [aiError, setAiError] = useState('')
+
+  async function handleAiSearch(customQuery = '') {
+    const queryToSearch = customQuery || aiQuery
+    if (!queryToSearch.trim()) return
+
+    setAiLoading(true)
+    setAiError('')
+    setAiResults([])
+
+    try {
+      // Map current resources database to condensed catalog
+      const catalog = [...dbResources, ...resources].map(r => ({
+        title: r.title,
+        url: r.url,
+        category: r.category,
+        department: r.department,
+        subject: r.subject
+      }))
+
+      const systemPrompt = `You are the Placement Hub AI Resource Finder.
+Your job is to recommend the highest-quality study resources (video lectures, practice sheets, websites, tutorials) for the student's request.
+
+We have a database of internal verified resources:
+${JSON.stringify(catalog)}
+
+Instructions:
+1. Always recommend a mix of internal resources from our database AND additional external high-quality learning links (from sources like LeetCode, GeeksforGeeks, Neso Academy, Gate Smashers, YouTube lectures, official documentation, GitHub repositories) to give the absolute best recommendations.
+2. For resources found in our internal database, set 'source' to 'verified'.
+3. For additional high-quality external resources NOT in our database, suggest real, direct URLs and set 'source' to 'external'.
+4. Recommend up to 5-6 best resources in total.
+5. You must ONLY output a JSON array of recommendation objects. Do not include any other text, greetings, markdown blocks (like \`\`\`json), or explanations outside of the JSON array.
+Each object must have these fields:
+  - 'title': String (title of the resource)
+  - 'url': String (valid absolute URL starting with http:// or https://)
+  - 'category': String (one of: 'coding', 'core', 'aptitude', 'interview', 'company')
+  - 'subject': String (e.g., 'Dynamic Programming', 'Database Systems', etc.)
+  - 'description': String (brief explanation of why this resource is relevant and how it helps)
+  - 'tags': Array of strings (e.g., ['#dsa', '#leetcode'])
+  - 'source': String (either 'verified' or 'external')`
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ message: `${systemPrompt}\n\nStudent request: "${queryToSearch}"` })
+      })
+
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}`)
+      }
+
+      const data = await response.json()
+      let rawText = data.response || ''
+      
+      // Clean up markdown blocks if they exist
+      rawText = rawText.trim()
+      if (rawText.startsWith('```')) {
+        rawText = rawText.replace(/^```(json)?/i, '')
+        rawText = rawText.replace(/```$/i, '')
+        rawText = rawText.trim()
+      }
+
+      const parsed = JSON.parse(rawText)
+      if (Array.isArray(parsed)) {
+        setAiResults(parsed)
+      } else {
+        throw new Error("AI response format was not a valid array.")
+      }
+    } catch (err) {
+      console.error("AI Resource Search Error:", err)
+      setAiError(err.message || 'Failed to curate resources. Please try again.')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const handleChipClick = (suggestion) => {
+    setAiQuery(suggestion)
+    handleAiSearch(suggestion)
+  }
+
 
   // Initialize to user's department once profile loads
   useEffect(() => {
@@ -350,22 +439,218 @@ export default function Resources() {
         </p>
       </div>
 
-      {/* Modern Search bar */}
-      <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 16, padding: 18, marginBottom: 24 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', background: 'var(--main-bg)', border: '1px solid var(--card-border)', borderRadius: 10, padding: '10px 14px' }}>
-          <Search size={20} color="var(--text-secondary)" />
-          <input 
-            type="text" 
-            placeholder="Search keywords, coding sheets, mock papers, playlists..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ width: '100%', border: 'none', background: 'transparent', outline: 'none', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit' }}
-          />
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')} style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={18} /></button>
-          )}
+
+
+      {/* AI Resource Advisor Banner */}
+      <div style={{ 
+        background: 'linear-gradient(135deg, rgba(147, 51, 234, 0.08) 0%, rgba(219, 39, 119, 0.05) 100%)', 
+        border: '1.5px solid rgba(147, 51, 234, 0.25)', 
+        borderRadius: 20, 
+        padding: 24, 
+        marginBottom: 28,
+        boxShadow: '0 8px 32px 0 rgba(147, 51, 234, 0.05)',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        {/* Spinner style helper */}
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+          .spinner-icon {
+            animation: spin 1s linear infinite;
+          }
+        `}</style>
+        
+        {/* Subtle background glow */}
+        <div style={{ 
+          position: 'absolute', 
+          top: -100, 
+          right: -100, 
+          width: 300, 
+          height: 300, 
+          background: 'radial-gradient(circle, rgba(147, 51, 234, 0.15) 0%, transparent 70%)',
+          pointerEvents: 'none'
+        }} />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <div style={{ 
+            background: 'linear-gradient(135deg, var(--purple-primary) 0%, #db2777 100%)', 
+            color: '#fff', 
+            width: 36, 
+            height: 36, 
+            borderRadius: 10, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(147, 51, 234, 0.3)'
+          }}>
+            <Sparkles size={18} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: 16.5, fontWeight: 900, color: 'var(--text-primary)', margin: 0, fontFamily: 'Urbanist, sans-serif' }}>AI Placement Resource Advisor</h3>
+            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '2px 0 0' }}>Ask for personalized study material, sheets, or subject recommendations.</p>
+          </div>
         </div>
+
+        {/* Suggestion Chips */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
+          {[
+            "Best DSA coding sheets",
+            "Dynamic Programming video lectures",
+            "Operating Systems theory",
+            "Quantitative Aptitude shortcut formulas",
+            "TCS & Infosys mock papers"
+          ].map((suggestion, i) => (
+            <button
+              key={i}
+              onClick={() => handleChipClick(suggestion)}
+              disabled={aiLoading}
+              style={{
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(147, 51, 234, 0.15)',
+                color: 'var(--text-secondary)',
+                padding: '6px 12px',
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: aiLoading ? 'not-allowed' : 'pointer',
+                transition: 'all 0.2s',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+              onMouseEnter={(e) => {
+                if (!aiLoading) {
+                  e.currentTarget.style.background = 'rgba(147, 51, 234, 0.1)'
+                  e.currentTarget.style.borderColor = 'rgba(147, 51, 234, 0.4)'
+                  e.currentTarget.style.color = 'var(--text-primary)'
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!aiLoading) {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)'
+                  e.currentTarget.style.borderColor = 'rgba(147, 51, 234, 0.15)'
+                  e.currentTarget.style.color = 'var(--text-secondary)'
+                }
+              }}
+            >
+              🔍 {suggestion}
+            </button>
+          ))}
+        </div>
+
+        {/* Input box */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', background: 'var(--main-bg)', border: '1px solid var(--card-border)', borderRadius: 12, padding: '10px 14px' }}>
+          <textarea
+            rows={1}
+            placeholder="Type your target topic or role (e.g., 'Recommend resources to prepare for computer networks subnetting questions')"
+            value={aiQuery}
+            onChange={(e) => setAiQuery(e.target.value)}
+            disabled={aiLoading}
+            style={{
+              width: '100%',
+              border: 'none',
+              background: 'transparent',
+              outline: 'none',
+              color: 'var(--text-primary)',
+              fontSize: 13.5,
+              fontFamily: 'inherit',
+              resize: 'none',
+              minHeight: 24,
+              maxHeight: 120
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                handleAiSearch()
+              }
+            }}
+          />
+          <button
+            onClick={() => handleAiSearch()}
+            disabled={aiLoading || !aiQuery.trim()}
+            style={{
+              background: aiQuery.trim() ? 'linear-gradient(135deg, var(--purple-primary) 0%, #db2777 100%)' : 'var(--card-border)',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              padding: '8px 16px',
+              fontSize: 12.5,
+              fontWeight: 800,
+              cursor: (aiLoading || !aiQuery.trim()) ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              transition: 'all 0.2s',
+              boxShadow: aiQuery.trim() ? '0 4px 12px rgba(147, 51, 234, 0.2)' : 'none'
+            }}
+          >
+            {aiLoading ? (
+              <>
+                <Loader2 className="spinner-icon" size={14} /> Curating...
+              </>
+            ) : (
+              <>
+                <Sparkles size={14} /> Curate
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Error handling */}
+        {aiError && (
+          <div style={{ marginTop: 12, color: '#ef4444', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+            ⚠️ {aiError}
+          </div>
+        )}
       </div>
+
+      {/* AI Recommendations Results Grid */}
+      {aiResults.length > 0 && (
+        <div style={{ 
+          background: 'rgba(147, 51, 234, 0.03)', 
+          border: '1.5px solid rgba(147, 51, 234, 0.2)', 
+          borderRadius: 20, 
+          padding: 24, 
+          marginBottom: 36,
+          boxShadow: 'var(--shadow-card)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, borderBottom: '1px solid var(--card-border)', paddingBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Sparkles size={20} color="var(--purple-primary)" />
+              <h3 style={{ fontSize: 17, fontWeight: 900, color: 'var(--text-primary)', margin: 0 }}>AI Curated Recommendations</h3>
+            </div>
+            <button
+              onClick={() => {
+                setAiResults([])
+                setAiQuery('')
+              }}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-muted)',
+                fontSize: 12.5,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+            >
+              <X size={15} /> Clear AI Results
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 20 }}>
+            {aiResults.map((res, index) => (
+              <AiResourceCard key={index} res={res} onClick={() => handleResourceClick(`ai-${index}`, res.url)} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Dynamic Department Tabs Selector */}
       <div style={{ marginBottom: 24 }}>
@@ -461,7 +746,7 @@ export default function Resources() {
             {aptitudeResources.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', fontSize: 13.5, background: 'var(--card-bg)', padding: 20, borderRadius: 14 }}>No aptitude preparation resources matching active search query.</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 20 }}>
                 {aptitudeResources.map(res => <ResourceCard key={res.id} res={res} searchQuery={searchQuery} onClick={() => handleResourceClick(res.id, res.url)} />)}
               </div>
             )}
@@ -475,7 +760,7 @@ export default function Resources() {
             {codingResources.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', fontSize: 13.5, background: 'var(--card-bg)', padding: 20, borderRadius: 14 }}>No programming sheets or coding platforms matching active search query.</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 20 }}>
                 {codingResources.map(res => <ResourceCard key={res.id} res={res} searchQuery={searchQuery} onClick={() => handleResourceClick(res.id, res.url)} />)}
               </div>
             )}
@@ -489,7 +774,7 @@ export default function Resources() {
             {coreResources.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', fontSize: 13.5, background: 'var(--card-bg)', padding: 20, borderRadius: 14 }}>No core subjects reference guides or playlists available yet.</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 20 }}>
                 {coreResources.map(res => <ResourceCard key={res.id} res={res} searchQuery={searchQuery} onClick={() => handleResourceClick(res.id, res.url)} />)}
               </div>
             )}
@@ -503,7 +788,7 @@ export default function Resources() {
             {interviewResources.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', fontSize: 13.5, background: 'var(--card-bg)', padding: 20, borderRadius: 14 }}>No foundational interview questions available yet for this branch.</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 20 }}>
                 {interviewResources.map(res => <ResourceCard key={res.id} res={res} searchQuery={searchQuery} onClick={() => handleResourceClick(res.id, res.url)} />)}
               </div>
             )}
@@ -517,7 +802,7 @@ export default function Resources() {
             {companyResources.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', fontSize: 13.5, background: 'var(--card-bg)', padding: 20, borderRadius: 14 }}>No mock assessments or assessment sheets found.</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 20 }}>
                 {companyResources.map(res => <ResourceCard key={res.id} res={res} searchQuery={searchQuery} onClick={() => handleResourceClick(res.id, res.url)} />)}
               </div>
             )}
@@ -566,7 +851,7 @@ export default function Resources() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 36 }}>
             
             {/* Three Prep Pillars Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 24 }}>
               {/* Aptitude Pillar */}
               {showAptitude && (
                 <div style={{ background: 'var(--card-bg)', border: '1.5px solid var(--card-border)', borderRadius: 18, padding: 22, boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
@@ -876,6 +1161,135 @@ function ResourceCard({ res, searchQuery, onClick }) {
         <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--card-border)', paddingTop: 12 }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12.5, fontWeight: 700, color: dStyle.text || 'var(--purple-primary)' }}>
             {isVideo ? 'Watch Playlist' : 'Open Link'} <ExternalLink size={13} />
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AiResourceCard({ res, onClick }) {
+  const isVideo = res.url?.includes('youtube.com') || res.url?.includes('youtu.be')
+  const thumbnail = getYoutubeThumbnail(res.url)
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <div 
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ 
+        background: 'var(--card-bg)', 
+        border: hovered ? '1.5px solid var(--purple-primary)' : '1.5px solid var(--card-border)', 
+        borderRadius: 18, 
+        overflow: 'hidden',
+        cursor: 'pointer',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        transform: hovered ? 'translateY(-4px)' : 'translateY(0)',
+        boxShadow: hovered ? '0 12px 28px rgba(147,51,234,0.08)' : 'var(--shadow-card)',
+        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
+      }}
+    >
+      <div>
+        {/* Render Thumbnail if YouTube */}
+        {isVideo && (
+          <div style={{ width: '100%', height: 150, position: 'relative', overflow: 'hidden' }}>
+            <img src={thumbnail} alt={res.title} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: hovered ? 'scale(1.05)' : 'scale(1)', transition: 'transform 0.4s ease' }} />
+            <div style={{ position: 'absolute', inset: 0, background: hovered ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.25s' }}>
+              <div style={{ 
+                width: 42, 
+                height: 42, 
+                borderRadius: 999, 
+                background: 'rgba(239,68,68,0.95)', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                color: '#fff', 
+                fontSize: 12,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                transform: hovered ? 'scale(1.1)' : 'scale(1)',
+                transition: 'transform 0.25s'
+              }}>
+                ▶
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ padding: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ 
+              display: 'inline-flex', 
+              alignItems: 'center', 
+              gap: 4, 
+              fontSize: 10, 
+              fontWeight: 900, 
+              color: '#fff', 
+              background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)', 
+              padding: '3px 8px', 
+              borderRadius: 6,
+              textTransform: 'uppercase',
+              letterSpacing: 0.5
+            }}>
+              ✨ AI Pick
+            </span>
+            <span style={{ 
+              fontSize: 10, 
+              fontWeight: 800, 
+              color: res.source === 'verified' ? '#166534' : '#2563eb', 
+              background: res.source === 'verified' ? '#dcfce7' : 'rgba(37,99,235,0.08)', 
+              border: res.source === 'verified' ? '1px solid rgba(22,101,52,0.2)' : '1px solid rgba(37,99,235,0.2)', 
+              padding: '3px 8px', 
+              borderRadius: 6,
+              textTransform: 'uppercase'
+            }}>
+              {res.source === 'verified' ? 'Verified Database' : 'External Link'}
+            </span>
+          </div>
+
+          <h3 style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 5, lineHeight: 1.35 }}>
+            {res.title}
+          </h3>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>📚</span>
+            <span style={{ fontWeight: 800, color: 'var(--text-secondary)' }}>{res.subject}</span>
+          </div>
+          
+          {res.description && (
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45, margin: '6px 0 12px', background: 'rgba(255,255,255,0.02)', padding: 10, borderRadius: 8, borderLeft: '2.5px solid var(--purple-primary)' }}>
+              {res.description}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div style={{ padding: '0 18px 18px' }}>
+        {/* Render Tags */}
+        {res.tags && res.tags.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+            {res.tags.map(tag => (
+              <span key={tag} 
+                style={{ 
+                  fontSize: 10, 
+                  fontWeight: 700, 
+                  color: 'var(--text-secondary)', 
+                  background: 'var(--main-bg)', 
+                  border: '1px solid var(--card-border)',
+                  padding: '3px 7px', 
+                  borderRadius: 6
+                }}
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--card-border)', paddingTop: 12 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 700, color: 'var(--purple-primary)' }}>
+            {isVideo ? 'Watch Playlist' : 'Study Resource'} <ExternalLink size={12} />
           </span>
         </div>
       </div>

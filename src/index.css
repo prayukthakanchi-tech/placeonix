@@ -709,6 +709,38 @@ img { max-width: 100%; display: block; }
   border: 2px solid #fff;
 }
 
+.topbar-notif-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 12px;
+  width: 320px;
+  background: var(--card-bg);
+  border: 1.5px solid var(--card-border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-hover);
+  z-index: 50;
+  overflow: hidden;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 640px) {
+  .topbar-notif-dropdown {
+    position: fixed;
+    top: 68px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    margin-top: 0;
+    z-index: 999;
+  }
+}
+
 .topbar-user {
   display: flex;
   align-items: center;
@@ -2033,3 +2065,100 @@ img { max-width: 100%; display: block; }
     display: none;
   }
 }
+
+/* Aptitude mobile responsiveness utilities */
+.aptitude-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.aptitude-options-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.aptitude-diagnostics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  flex: 1;
+}
+
+@media (max-width: 768px) {
+  .aptitude-options-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .aptitude-diagnostics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Mobile view improvements */
+@media (max-width: 640px) {
+  .topbar {
+    padding: 0 16px;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar-username {
+    display: none !important;
+  }
+  .topbar-user {
+    padding: 5px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+.responsive-lang-strip {
+  display: flex;
+}
+
+@media (max-width: 900px) {
+  .responsive-lang-strip {
+    margin-left: 0 !important;
+    width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding: 6px 0;
+    -webkit-overflow-scrolling: touch;
+    gap: 8px !important;
+  }
+  .responsive-lang-strip button {
+    flex-shrink: 0;
+  }
+  .responsive-lang-strip::-webkit-scrollbar {
+    height: 4px;
+  }
+  .responsive-lang-strip::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .responsive-lang-strip::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 999px;
+  }
+}
+
+/* View Transitions API overrides for theme transition wave */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none !important;
+  mix-blend-mode: normal !important;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 9999;
+}
+

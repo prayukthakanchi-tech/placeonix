@@ -2,11 +2,26 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Helper function to check if the user is an admin
+    function isAdmin() {
+      return request.auth != null && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        request.auth.token.email == 'prayukthakanchi@gmail.com'
+      );
+    }
+
     // ── User profiles ─────────────────────────────────────────────
-    // Each user can only read and write their own document.
+    // Each user can read their own document.
+    // They can create/update it, but cannot change the "role" field unless they are an admin.
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
       allow read: if resource.data.portfolioEnabled == true;
+      allow create: if request.auth != null && request.auth.uid == userId &&
+        (request.resource.data.role == 'student' || !request.resource.data.keys().hasAny(['role']) || isAdmin());
+      allow update: if request.auth != null && (
+        isAdmin() ||
+        (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))
+      );
     }
 
     // ── Shared resources (educational links) ──────────────────────
@@ -14,8 +29,7 @@ service cloud.firestore {
     // Only admin accounts can write/delete resources.
     match /resources/{resourceId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow write: if isAdmin();
     }
 
     // ── Orders (resume review purchases) ─────────────────────────
@@ -28,11 +42,38 @@ service cloud.firestore {
         request.resource.data.userId == request.auth.uid;
 
       allow read, update: if request.auth != null && (
-        resource.data.userId == request.auth.uid ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        resource.data.userId == request.auth.uid || isAdmin()
       );
 
-      allow delete: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ── Student Feedback & Reviews ───────────────────────────────
+    // Students can submit/edit their own review.
+    // Admins can read and delete all reviews.
+    match /feedback/{userId} {
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if isAdmin();
+    }
+
+    // ── AI Interviews ────────────────────────────────────────────
+    // Authenticated users can log their mock interviews.
+    // Users can read their own mock interviews, admins can read/delete all.
+    match /interviews/{interviewId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null && (
+        resource == null || resource.data.uid == request.auth.uid || isAdmin()
+      );
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Notifications / Alerts ───────────────────────────────────
+    // Authenticated users can read notifications.
+    // Admins can broadcast and delete notifications.
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
     }
   }
 }

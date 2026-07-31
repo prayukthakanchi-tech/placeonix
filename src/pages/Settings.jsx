@@ -1,19 +1,20 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../firebase/config'
 
-const BRANCHES = ['CSE', 'ECE', 'EEE', 'ME', 'CE', 'IT', 'MBA', 'Other']
-const GRAD_YEARS = [2024, 2025, 2026, 2027, 2028]
+const BRANCHES = ['ECE', 'CSE', 'EEE', 'IT', 'ME', 'CIVIL', 'AERO', 'BME', 'BT']
+const GRAD_YEARS = [2024, 2025, 2026, 2027, 2028, 2029, 2030]
 
 const NOTIFICATION_OPTIONS = [
   { key: 'emailUpdates',   label: 'Email updates',            desc: 'Receive order & feature updates via email' },
   { key: 'practiceReminder', label: 'Daily practice reminder', desc: 'Get a reminder to practice coding & aptitude' },
+  { key: 'pushAlerts',       label: 'Platform push alerts',     desc: 'Get native browser alerts for badge unlocks and mock tests' },
 ]
 
 function Toggle({ checked, onChange }) {
   return (
-    <div onClick={() => onChange(!checked)}
+    <div onClick={(e) => onChange(!checked, e)}
       style={{ width: 44, height: 24, borderRadius: 999, background: checked ? '#7c3aed' : '#d1d5db', cursor: 'pointer', position: 'relative', transition: 'background 0.25s', flexShrink: 0 }}>
       <div style={{ width: 18, height: 18, borderRadius: 999, background: '#fff', position: 'absolute', top: 3, left: checked ? 23 : 3, transition: 'left 0.25s', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }} />
     </div>
@@ -48,15 +49,64 @@ export default function Settings() {
   const [notifs, setNotifs] = useState({
     emailUpdates:     profile?.notifs?.emailUpdates    ?? true,
     practiceReminder: profile?.notifs?.practiceReminder ?? true,
+    pushAlerts:       profile?.notifs?.pushAlerts      ?? true,
   })
+
+  // Sync profile details when loaded
+  useEffect(() => {
+    if (profile) {
+      setName(profile.name || user?.displayName || '')
+      setBranch(profile.branch || 'CSE')
+      setGradYear(profile.graduationYear || 2025)
+      setLinkedin(profile.linkedin || '')
+      setPhone(profile.phone || '')
+      setNotifs({
+        emailUpdates:     profile.notifs?.emailUpdates    ?? true,
+        practiceReminder: profile.notifs?.practiceReminder ?? true,
+        pushAlerts:       profile.notifs?.pushAlerts      ?? true,
+      })
+    }
+  }, [profile, user])
 
   // Dark mode — stored in localStorage, applied via class
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('plx_theme') === 'dark')
 
-  function applyTheme(dark) {
-    setDarkMode(dark)
-    localStorage.setItem('plx_theme', dark ? 'dark' : 'light')
-    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+  function applyTheme(dark, e) {
+    if (!document.startViewTransition) {
+      setDarkMode(dark)
+      localStorage.setItem('plx_theme', dark ? 'dark' : 'light')
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+      return
+    }
+
+    const x = e?.clientX ?? window.innerWidth / 2
+    const y = e?.clientY ?? window.innerHeight / 2
+    const endRadius = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y)
+    )
+
+    const transition = document.startViewTransition(() => {
+      setDarkMode(dark)
+      localStorage.setItem('plx_theme', dark ? 'dark' : 'light')
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+    })
+
+    transition.ready.then(() => {
+      document.documentElement.animate(
+        {
+          clipPath: [
+            `circle(0px at ${x}px ${y}px)`,
+            `circle(${endRadius}px at ${x}px ${y}px)`
+          ]
+        },
+        {
+          duration: 450,
+          easing: 'ease-in-out',
+          pseudoElement: '::view-transition-new(root)'
+        }
+      )
+    })
   }
 
   async function handleSaveProfile(e) {
@@ -98,7 +148,7 @@ export default function Settings() {
       {/* Profile Settings */}
       <Section title="Profile Information" subtitle="Update your personal details visible across Placeonix">
         <form onSubmit={handleSaveProfile}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: 14, marginBottom: 14 }}>
             {[
               { label: 'Display Name', value: name, setter: setName, type: 'text', placeholder: 'Your name' },
               { label: 'Phone Number', value: phone, setter: setPhone, type: 'tel', placeholder: '10-digit number' },
@@ -113,7 +163,7 @@ export default function Settings() {
             ))}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: 14, marginBottom: 14 }}>
             <div>
               <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Branch</label>
               <select value={branch} onChange={e => setBranch(e.target.value)}
@@ -165,7 +215,7 @@ export default function Settings() {
         </div>
         <div style={{ marginTop: 18, display: 'flex', gap: 10 }}>
           {[{ label: '☀️ Light', value: false }, { label: '🌙 Dark', value: true }].map(opt => (
-            <button key={opt.label} onClick={() => applyTheme(opt.value)}
+            <button key={opt.label} onClick={(e) => applyTheme(opt.value, e)}
               style={{ flex: 1, padding: '10px', borderRadius: 10, border: `1.5px solid ${darkMode === opt.value ? '#7c3aed' : 'var(--card-border)'}`, background: darkMode === opt.value ? 'var(--purple-xsoft)' : 'var(--card-bg)', color: darkMode === opt.value ? '#7c3aed' : 'var(--text-secondary)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
               {opt.label}
             </button>
@@ -185,7 +235,21 @@ export default function Settings() {
               <Toggle checked={notifs[opt.key]} onChange={val => {
                 const updated = { ...notifs, [opt.key]: val }
                 setNotifs(updated)
-                if (user) updateDoc(doc(db, 'users', user.uid), { notifs: updated, updatedAt: serverTimestamp() }).catch(() => {})
+                if (user) {
+                  updateDoc(doc(db, 'users', user.uid), { notifs: updated, updatedAt: serverTimestamp() }).catch(() => {})
+                }
+
+                // Native browser push alerts validation & confirmation
+                if (val && 'Notification' in window) {
+                  Notification.requestPermission().then(permission => {
+                    if (permission === 'granted') {
+                      new Notification('Notifications Enabled!', {
+                        body: `You will now get alerts for: ${opt.label}`,
+                        icon: '/favicon.ico'
+                      })
+                    }
+                  })
+                }
               }} />
             </div>
           ))}
