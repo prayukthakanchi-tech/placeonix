@@ -64,53 +64,57 @@ int main() {
 }
 
 const THEMES = {
-  dracula: {
-    name: '🧛 Dracula',
-    bg: '#282a36',
+  cyberpunk: {
+    name: '🌌 Cyberpunk Neon',
+    bg: '#090714',
+    text: '#e2d9f3',
+    lineBg: '#130e26',
+    lineColor: '#7c5cbf',
+    border: '#2b1b4d',
+    toolbarBg: '#110b24',
+    outputBg: '#0d081d',
+    btnBg: '#2b1b4d',
+    btnText: '#00f0ff',
+    accent: '#00f0ff'
+  },
+  monokaiGold: {
+    name: '🥷 Monokai Gold',
+    bg: '#19181a',
     text: '#f8f8f2',
-    lineBg: '#21222c',
-    lineColor: '#6272a4',
-    border: '#44475a',
-    toolbarBg: '#191a21',
-    outputBg: '#1e1f29',
-    btnBg: '#44475a',
-    btnText: '#f8f8f2'
+    lineBg: '#222124',
+    lineColor: '#727075',
+    border: '#3a383e',
+    toolbarBg: '#222125',
+    outputBg: '#141315',
+    btnBg: '#3a383e',
+    btnText: '#ffd866',
+    accent: '#ffd866'
   },
-  oneDark: {
-    name: '🌘 One Dark',
-    bg: '#282c34',
-    text: '#abb2bf',
-    lineBg: '#21252b',
-    lineColor: '#5c6370',
-    border: '#3e4451',
-    toolbarBg: '#1e2227',
-    outputBg: '#181a1f',
-    btnBg: '#3e4451',
-    btnText: '#abb2bf'
+  emeraldDark: {
+    name: '🌲 Emerald Dark',
+    bg: '#061a14',
+    text: '#e6f7f2',
+    lineBg: '#0b2920',
+    lineColor: '#4d8070',
+    border: '#174739',
+    toolbarBg: '#0a241c',
+    outputBg: '#04120e',
+    btnBg: '#174739',
+    btnText: '#34d399',
+    accent: '#34d399'
   },
-  nord: {
-    name: '❄️ Nord',
-    bg: '#2e3440',
-    text: '#d8dee9',
-    lineBg: '#242933',
-    lineColor: '#4c566a',
-    border: '#3b4252',
-    toolbarBg: '#1f232a',
-    outputBg: '#1a1c23',
-    btnBg: '#3b4252',
-    btnText: '#d8dee9'
-  },
-  githubLight: {
-    name: '☀️ Light',
+  cleanLight: {
+    name: '☀️ Clean Light',
     bg: '#ffffff',
-    text: '#24292e',
-    lineBg: '#f6f8fa',
-    lineColor: '#959da5',
-    border: '#e1e4e8',
-    toolbarBg: '#eaecef',
-    outputBg: '#fafbfc',
-    btnBg: '#e1e4e8',
-    btnText: '#24292e'
+    text: '#1e293b',
+    lineBg: '#f8fafc',
+    lineColor: '#94a3b8',
+    border: '#cbd5e1',
+    toolbarBg: '#f1f5f9',
+    outputBg: '#f8fafc',
+    btnBg: '#e2e8f0',
+    btnText: '#0f172a',
+    accent: '#6366f1'
   }
 }
 
@@ -237,7 +241,7 @@ const INITIAL_TEST_CASES = [
 export default function OnlineCompiler() {
   const [lang, setLang] = useState(71)
   const [codeMap, setCodeMap] = useState({ ...DEFAULT_CODE })
-  const [theme, setTheme] = useState('dracula')
+  const [theme, setTheme] = useState('cyberpunk')
   const [showStdin, setShowStdin] = useState(true)
   const [stdin, setStdin] = useState('22\n30')
   const [output, setOutput] = useState(null)
@@ -424,7 +428,7 @@ export default function OnlineCompiler() {
   }
 
   const currentLang = LANGUAGES.find(l => l.id === lang)
-  const themeConfig = THEMES[theme]
+  const themeConfig = THEMES[theme] || THEMES.cyberpunk
 
   return (
     <div className="responsive-app-height" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -446,7 +450,7 @@ export default function OnlineCompiler() {
           border-right: 1.5px solid ${themeConfig.border};
         }
         .io-section {
-          width: 420px;
+          width: 440px;
           display: flex;
           flex-direction: column;
           background: ${themeConfig.outputBg};
@@ -474,13 +478,13 @@ export default function OnlineCompiler() {
       {/* Top Title Bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14, flexShrink: 0, flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 22, color: 'var(--text-primary)', lineHeight: 1.2 }}>💻 Online Compiler</h1>
-          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>Write, run, and execute code with interactive test cases</p>
+          <h1 style={{ fontFamily: 'Urbanist, sans-serif', fontWeight: 900, fontSize: 24, color: 'var(--text-primary)', lineHeight: 1.2 }}>💻 Online Compiler</h1>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>Write code, manage test cases, and compare expected output in real-time</p>
         </div>
         
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <select value={theme} onChange={e => setTheme(e.target.value)}
-            style={{ padding: '6px 12px', borderRadius: 8, border: '1.5px solid var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-primary)', fontSize: 12, fontWeight: 700, outline: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
+            style={{ padding: '7px 14px', borderRadius: 10, border: '1.5px solid var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 700, outline: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
             {Object.keys(THEMES).map(k => <option key={k} value={k}>{THEMES[k].name}</option>)}
           </select>
         </div>
@@ -596,9 +600,9 @@ export default function OnlineCompiler() {
                 fontSize: 11.5,
                 fontWeight: 800,
                 border: 'none',
-                borderBottom: activeTab === 'testcases' ? '2.5px solid #8b5cf6' : '2.5px solid transparent',
+                borderBottom: activeTab === 'testcases' ? `2.5px solid ${themeConfig.accent}` : '2.5px solid transparent',
                 background: 'transparent',
-                color: activeTab === 'testcases' ? '#a78bfa' : themeConfig.lineColor,
+                color: activeTab === 'testcases' ? themeConfig.accent : themeConfig.lineColor,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 textTransform: 'uppercase',
@@ -616,9 +620,9 @@ export default function OnlineCompiler() {
                 fontSize: 11.5,
                 fontWeight: 800,
                 border: 'none',
-                borderBottom: activeTab === 'stdin' ? '2.5px solid #8b5cf6' : '2.5px solid transparent',
+                borderBottom: activeTab === 'stdin' ? `2.5px solid ${themeConfig.accent}` : '2.5px solid transparent',
                 background: 'transparent',
-                color: activeTab === 'stdin' ? '#a78bfa' : themeConfig.lineColor,
+                color: activeTab === 'stdin' ? themeConfig.accent : themeConfig.lineColor,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 textTransform: 'uppercase',
@@ -636,9 +640,9 @@ export default function OnlineCompiler() {
                 fontSize: 11.5,
                 fontWeight: 800,
                 border: 'none',
-                borderBottom: activeTab === 'output' ? '2.5px solid #8b5cf6' : '2.5px solid transparent',
+                borderBottom: activeTab === 'output' ? `2.5px solid ${themeConfig.accent}` : '2.5px solid transparent',
                 background: 'transparent',
-                color: activeTab === 'output' ? '#a78bfa' : themeConfig.lineColor,
+                color: activeTab === 'output' ? themeConfig.accent : themeConfig.lineColor,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 textTransform: 'uppercase',
@@ -662,7 +666,7 @@ export default function OnlineCompiler() {
                   fontWeight: 800,
                   display: 'flex',
                   alignItems: 'center',
-                  justify: 'space-between',
+                  justifyContent: 'space-between',
                   background: testSummary.passed === testSummary.total ? '#10b98120' : '#ef444420',
                   border: `1px solid ${testSummary.passed === testSummary.total ? '#10b98150' : '#ef444450'}`,
                   color: testSummary.passed === testSummary.total ? '#34d399' : '#f87171'
