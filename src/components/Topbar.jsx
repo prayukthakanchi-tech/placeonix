@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { Bell, Menu, Moon, Sun, CheckCircle2, AlertTriangle, AlertCircle, Info, BookOpen, Video, Code, Briefcase, Cpu } from 'lucide-react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore'
@@ -30,7 +30,7 @@ function getNotifIcon(type) {
 }
 
 
-export default function Topbar({ onSearch, onMenuToggle }) {
+export default function Topbar({ onMenuToggle }) {
   const { user, profile, logout } = useAuth()
   const [dark, setDark]   = useState(() => localStorage.getItem('plx_theme') === 'dark')
   const displayName = profile?.name || user?.displayName || user?.email?.split('@')[0] || 'Student'
@@ -63,40 +63,45 @@ export default function Topbar({ onSearch, onMenuToggle }) {
     return unsub
   }, [])
 
-  // Filter based on student's department/branch
+  // Filter based on student's department/branch — memoised to prevent recalc on every render
   const userDept = profile?.branch || 'ALL'
-  const activeNotifications = dbNotifications.filter(n => {
-    return n.targetDept === 'ALL' || n.targetDept === userDept
-  })
+  const { displayNotifs, unreadCount } = useMemo(() => {
+    const activeNotifications = dbNotifications.filter(n =>
+      n.targetDept === 'ALL' || n.targetDept === userDept
+    )
 
-  const mappedDbNotifs = activeNotifications.map(n => {
-    let detectedType = n.type || 'info'
-    if (detectedType === 'info' || !n.type) {
-      const titleLower = (n.title || '').toLowerCase()
-      const messageLower = (n.message || '').toLowerCase()
-      if (titleLower.includes('aptitude') || messageLower.includes('aptitude')) {
-        detectedType = 'aptitude'
-      } else if (titleLower.includes('interview') || messageLower.includes('interview') || titleLower.includes('mock') || messageLower.includes('mock')) {
-        detectedType = 'interview'
-      } else if (titleLower.includes('welcome') || messageLower.includes('welcome')) {
-        detectedType = 'success'
-      } else if (titleLower.includes('coding') || messageLower.includes('coding') || titleLower.includes('dsa') || messageLower.includes('dsa') || titleLower.includes('contest') || messageLower.includes('contest') || titleLower.includes('practice') || messageLower.includes('practice')) {
-        detectedType = 'coding'
-      } else if (titleLower.includes('company') || messageLower.includes('company') || titleLower.includes('job') || messageLower.includes('job') || titleLower.includes('drive') || messageLower.includes('drive') || titleLower.includes('hiring') || messageLower.includes('hiring') || titleLower.includes('placement') || messageLower.includes('placement') || titleLower.includes('intern') || messageLower.includes('intern')) {
-        detectedType = 'company'
-      } else if (titleLower.includes('core') || messageLower.includes('core') || titleLower.includes('subject') || messageLower.includes('subject') || titleLower.includes('mcq') || messageLower.includes('mcq')) {
-        detectedType = 'core'
+    const mapped = activeNotifications.map(n => {
+      let detectedType = n.type || 'info'
+      if (detectedType === 'info' || !n.type) {
+        const titleLower = (n.title || '').toLowerCase()
+        const messageLower = (n.message || '').toLowerCase()
+        if (titleLower.includes('aptitude') || messageLower.includes('aptitude')) {
+          detectedType = 'aptitude'
+        } else if (titleLower.includes('interview') || messageLower.includes('interview') || titleLower.includes('mock') || messageLower.includes('mock')) {
+          detectedType = 'interview'
+        } else if (titleLower.includes('welcome') || messageLower.includes('welcome')) {
+          detectedType = 'success'
+        } else if (titleLower.includes('coding') || messageLower.includes('coding') || titleLower.includes('dsa') || messageLower.includes('dsa') || titleLower.includes('contest') || messageLower.includes('contest') || titleLower.includes('practice') || messageLower.includes('practice')) {
+          detectedType = 'coding'
+        } else if (titleLower.includes('company') || messageLower.includes('company') || titleLower.includes('job') || messageLower.includes('job') || titleLower.includes('drive') || messageLower.includes('drive') || titleLower.includes('hiring') || messageLower.includes('hiring') || titleLower.includes('placement') || messageLower.includes('placement') || titleLower.includes('intern') || messageLower.includes('intern')) {
+          detectedType = 'company'
+        } else if (titleLower.includes('core') || messageLower.includes('core') || titleLower.includes('subject') || messageLower.includes('subject') || titleLower.includes('mcq') || messageLower.includes('mcq')) {
+          detectedType = 'core'
+        }
       }
-    }
+      return {
+        id: n.id,
+        title: n.title,
+        desc: n.message,
+        type: detectedType
+      }
+    })
+
     return {
-      id: n.id,
-      title: n.title,
-      desc: n.message,
-      type: detectedType
+      displayNotifs: mapped,
+      unreadCount: mapped.filter(n => !readNotifIds.includes(n.id)).length
     }
-  })
-  const displayNotifs = mappedDbNotifs
-  const unreadCount = displayNotifs.filter(n => !readNotifIds.includes(n.id)).length
+  }, [dbNotifications, userDept, readNotifIds])
 
   function handleMarkAllRead() {
     const allIds = displayNotifs.map(n => n.id)
@@ -233,8 +238,8 @@ export default function Topbar({ onSearch, onMenuToggle }) {
           )}
         </div>
 
-        <button className="topbar-user" type="button" onClick={logout} title="Logout">
-          <div className="topbar-avatar">{initial}</div>
+        <button className="topbar-user" type="button" onClick={logout} title="Click to sign out" aria-label="Sign out">
+          <div className="topbar-avatar" aria-hidden="true">{initial}</div>
           <span className="topbar-username">
             Hi {displayName}
             <small>{branch}</small>

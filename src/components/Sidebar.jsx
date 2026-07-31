@@ -1,6 +1,5 @@
 import React from 'react'
 import {
-  BarChart3,
   BookOpen,
   Bot,
   Brain,
@@ -47,61 +46,55 @@ export default function Sidebar({ activePage, setActivePage, mobileOpen, onMobil
   }
 
   return (
-    <>
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div className="sidebar-overlay" onClick={onMobileClose} />
-      )}
-      <aside className={`sidebar${mobileOpen ? ' sidebar-mobile-open' : ''}`}>
-        <div className="sidebar-logo">
-          <div className="sidebar-brand-icon" style={{ fontSize: 22, width: 40, height: 40 }}>
-            <Sparkles className="sidebar-brand-spark" size={16} fill="currentColor" />
-            P
-          </div>
-          <span className="sidebar-logo-text" style={{ fontSize: 22, fontWeight: 900, fontFamily: 'Urbanist, sans-serif', letterSpacing: -0.5 }}>Placeonix</span>
-          {/* Mobile close button */}
-          <button className="sidebar-close-btn" onClick={onMobileClose} aria-label="Close menu">
-            <X size={18} />
-          </button>
+    <aside className={`sidebar${mobileOpen ? ' sidebar-mobile-open' : ''}`} aria-label="Main navigation">
+      <div className="sidebar-logo">
+        <div className="sidebar-brand-icon" style={{ fontSize: 22, width: 40, height: 40 }}>
+          <Sparkles className="sidebar-brand-spark" size={16} fill="currentColor" />
+          P
         </div>
+        <span className="sidebar-logo-text" style={{ fontSize: 22, fontWeight: 900, fontFamily: 'Urbanist, sans-serif', letterSpacing: -0.5 }}>Placeonix</span>
+        {/* Mobile close button */}
+        <button className="sidebar-close-btn" onClick={onMobileClose} aria-label="Close menu" type="button">
+          <X size={18} />
+        </button>
+      </div>
 
-        <nav className="sidebar-nav">
-          {visibleNavItems.map((item) => (
-            <NavButton
-              key={item.id}
-              item={item}
-              active={activePage === item.id}
-              onClick={() => handleNav(item.id)}
-            />
-          ))}
-        </nav>
+      <nav className="sidebar-nav" aria-label="App navigation">
+        {visibleNavItems.map((item) => (
+          <NavButton
+            key={item.id}
+            item={item}
+            active={activePage === item.id}
+            onClick={() => handleNav(item.id)}
+          />
+        ))}
+      </nav>
 
-        <div className="sidebar-progress-card">
-          <div className="sidebar-progress-header">
-            <div className="sidebar-progress-icon">
-              <Target size={16} aria-hidden="true" />
-            </div>
-            <div>
-              <div className="sidebar-progress-title">Keep Going!</div>
-            </div>
+      <div className="sidebar-progress-card">
+        <div className="sidebar-progress-header">
+          <div className="sidebar-progress-icon">
+            <Target size={16} aria-hidden="true" />
           </div>
-          <div className="sidebar-progress-sub">
-            Consistency today<br />Success tomorrow
+          <div>
+            <div className="sidebar-progress-title">Keep Going!</div>
           </div>
-          <div className="sidebar-progress-bar-wrap">
-            <div className="sidebar-progress-bar-fill" style={{ width: `${readiness}%` }} />
-          </div>
-          <div className="sidebar-progress-pct">{readiness}%</div>
         </div>
-
-        <div className="sidebar-bottom">
-          <button className="sidebar-logout" type="button" onClick={logout}>
-            <LogOut className="nav-icon" size={17} aria-hidden="true" />
-            <span>Logout</span>
-          </button>
+        <div className="sidebar-progress-sub">
+          Consistency today<br />Success tomorrow
         </div>
-      </aside>
-    </>
+        <div className="sidebar-progress-bar-wrap" role="progressbar" aria-valuenow={readiness} aria-valuemin={0} aria-valuemax={100} aria-label={`Placement readiness ${readiness}%`}>
+          <div className="sidebar-progress-bar-fill" style={{ width: `${readiness}%` }} />
+        </div>
+        <div className="sidebar-progress-pct">{readiness}%</div>
+      </div>
+
+      <div className="sidebar-bottom">
+        <button className="sidebar-logout" type="button" onClick={logout} aria-label="Sign out of Placeonix">
+          <LogOut className="nav-icon" size={17} aria-hidden="true" />
+          <span>Logout</span>
+        </button>
+      </div>
+    </aside>
   )
 }
 
@@ -113,6 +106,7 @@ function NavButton({ item, active, onClick }) {
       className={`nav-item ${active ? 'active' : ''}`}
       onClick={onClick}
       type="button"
+      aria-current={active ? 'page' : undefined}
     >
       <Icon className="nav-icon" size={17} aria-hidden="true" />
       <span>{item.label}</span>

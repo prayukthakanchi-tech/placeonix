@@ -1,4 +1,4 @@
-import React, { useState, lazy, Suspense, useEffect } from 'react'
+import React, { useState, lazy, Suspense, useEffect, useMemo } from 'react'
 import Sidebar from './components/Sidebar.jsx'
 import Topbar from './components/Topbar.jsx'
 import Footer from './components/Footer.jsx'
@@ -34,6 +34,11 @@ class ErrorBoundary extends React.Component {
 
   static getDerivedStateFromError(error) {
     return { hasError: true, error }
+  }
+
+  componentDidCatch(error, info) {
+    // In production, pipe to your error reporting service (e.g. Sentry)
+    console.error('[ErrorBoundary] Caught error:', error, info)
   }
 
   render() {
@@ -282,6 +287,15 @@ export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const meta = PAGE_META[activePage] || PAGE_META.dashboard
 
+  // Resolve portfolio ID safely inside the component (avoids SSR issues)
+  const PORTFOLIO_ID = useMemo(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('portfolio')
+    } catch {
+      return null
+    }
+  }, [])
+
   const [unlockedBadge, setUnlockedBadge] = useState(null)
 
   useEffect(() => {
@@ -391,16 +405,17 @@ export default function App() {
           <div className="css-confetti-container" style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
             {Array.from({ length: 45 }).map((_, i) => {
               const colors = ['#a78bfa', '#fbcfe8', '#fde68a', '#bfdbfe', '#bbf7d0']
-              const randColor = colors[Math.floor(Math.random() * colors.length)]
-              const left = `${Math.random() * 100}vw`
-              const delay = `${Math.random() * 1.5}s`
-              const duration = `${2.0 + Math.random() * 1.5}s`
+              // Use index-seeded values to avoid re-randomising on each render
+              const randColor = colors[i % colors.length]
+              const left = `${(i * 7 + 3) % 100}vw`
+              const delay = `${(i * 0.08) % 1.5}s`
+              const duration = `${2.0 + (i * 0.05) % 1.5}s`
               return (
                 <div key={i} className="css-confetti-particle" style={{
                   position: 'absolute', top: -20, left, background: randColor,
-                  width: `${6 + Math.random() * 8}px`, height: `${8 + Math.random() * 10}px`,
-                  borderRadius: Math.random() > 0.5 ? '50%' : '2px',
-                  transform: `rotate(${Math.random() * 360}deg)`,
+                  width: `${6 + (i % 8)}px`, height: `${8 + (i % 10)}px`,
+                  borderRadius: i % 2 === 0 ? '50%' : '2px',
+                  transform: `rotate(${(i * 19) % 360}deg)`,
                   animation: `fall ${duration} linear ${delay} infinite`
                 }} />
               )

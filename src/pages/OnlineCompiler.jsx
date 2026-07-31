@@ -325,6 +325,24 @@ export default function OnlineCompiler() {
     setTestCases(prev => prev.map(tc => tc.id === id ? { ...tc, ...patch } : tc))
   }
 
+  const handleRun = useCallback(async () => {
+    if (!code.trim()) return
+    setRunning(true)
+    setOutput(null)
+    setActiveTab('output')
+
+    const startTime = performance.now()
+    const result = await runCode(code, lang, showStdin ? stdin : '')
+    const duration = ((performance.now() - startTime) / 1000).toFixed(2)
+
+    setOutput({ ...result, time: duration })
+    setRunning(false)
+  }, [code, lang, showStdin, stdin])
+
+  // Stable ref so handleKeyDown can always call the latest handleRun without dep-loop
+  const handleRunRef = useRef(handleRun)
+  useEffect(() => { handleRunRef.current = handleRun }, [handleRun])
+
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Tab') {
       e.preventDefault()
@@ -355,25 +373,11 @@ export default function OnlineCompiler() {
 
     if (e.key === 'Enter' && e.ctrlKey) {
       e.preventDefault()
-      handleRun()
+      handleRunRef.current()
     }
-  }, [code, lang, stdin, showStdin])
+  }, [code])
 
-  async function handleRun() {
-    if (!code.trim()) return
-    setRunning(true)
-    setOutput(null)
-    setActiveTab('output')
-
-    const startTime = performance.now()
-    const result = await runCode(code, lang, showStdin ? stdin : '')
-    const duration = ((performance.now() - startTime) / 1000).toFixed(2)
-
-    setOutput({ ...result, time: duration })
-    setRunning(false)
-  }
-
-  async function handleRunTestCases() {
+  const handleRunTestCases = useCallback(async () => {
     if (!code.trim() || testCases.length === 0) return
     setRunningTestCases(true)
     setTestSummary(null)
@@ -405,13 +409,13 @@ export default function OnlineCompiler() {
     setTestCases(updatedCases)
     setTestSummary({ passed: passedCount, total: testCases.length })
     setRunningTestCases(false)
-  }
+  }, [code, lang, testCases])
 
-  function handleReset() {
+  const handleReset = useCallback(() => {
     setCode(DEFAULT_CODE[lang])
     setOutput(null)
     setTestSummary(null)
-  }
+  }, [lang])
 
   function handleCopy() {
     navigator.clipboard.writeText(code).then(() => {
@@ -684,27 +688,59 @@ export default function OnlineCompiler() {
                 {testCases.map((tc, idx) => {
                   const isActive = tc.id === activeCaseId
                   return (
-                    <button
+                    <div
                       key={tc.id}
-                      onClick={() => setActiveCaseId(tc.id)}
-                      style={{
-                        padding: '5px 12px',
-                        borderRadius: 8,
-                        fontSize: 11.5,
-                        fontWeight: 700,
-                        border: 'none',
-                        cursor: 'pointer',
-                        background: isActive ? '#6c3ce1' : themeConfig.btnBg,
-                        color: isActive ? '#ffffff' : themeConfig.btnText,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
+                      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}
                     >
-                      {tc.status === 'PASSED' && <span style={{ color: '#34d399' }}>✓</span>}
-                      {tc.status === 'FAILED' && <span style={{ color: '#f87171' }}>✕</span>}
-                      Case {idx + 1}
-                    </button>
+                      <button
+                        onClick={() => setActiveCaseId(tc.id)}
+                        style={{
+                          padding: testCases.length > 1 ? '5px 28px 5px 12px' : '5px 12px',
+                          borderRadius: 8,
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: isActive ? '#6c3ce1' : themeConfig.btnBg,
+                          color: isActive ? '#ffffff' : themeConfig.btnText,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                      >
+                        {tc.status === 'PASSED' && <span style={{ color: isActive ? '#a7f3d0' : '#34d399' }}>✓</span>}
+                        {tc.status === 'FAILED' && <span style={{ color: isActive ? '#fca5a5' : '#f87171' }}>✕</span>}
+                        Case {idx + 1}
+                      </button>
+                      {testCases.length > 1 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteTestCase(tc.id) }}
+                          title={`Remove Case ${idx + 1}`}
+                          style={{
+                            position: 'absolute',
+                            right: 6,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            width: 16,
+                            height: 16,
+                            borderRadius: '50%',
+                            border: 'none',
+                            background: isActive ? 'rgba(255,255,255,0.2)' : 'rgba(128,128,128,0.2)',
+                            color: isActive ? '#fff' : themeConfig.lineColor,
+                            fontSize: 10,
+                            fontWeight: 900,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            lineHeight: 1,
+                            padding: 0
+                          }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   )
                 })}
 
@@ -713,12 +749,13 @@ export default function OnlineCompiler() {
                   style={{
                     padding: '5px 10px',
                     borderRadius: 8,
-                    fontSize: 12,
+                    fontSize: 13,
                     fontWeight: 800,
                     border: `1px solid ${themeConfig.border}`,
                     background: 'transparent',
                     color: themeConfig.text,
-                    cursor: 'pointer'
+                    cursor: 'pointer',
+                    lineHeight: 1
                   }}
                   title="Add Test Case"
                 >
@@ -737,19 +774,9 @@ export default function OnlineCompiler() {
                   flexDirection: 'column',
                   gap: 10
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: themeConfig.lineColor, textTransform: 'uppercase' }}>
-                      Input (stdin)
-                    </span>
-                    {testCases.length > 1 && (
-                      <button
-                        onClick={() => handleDeleteTestCase(activeTestCase.id)}
-                        style={{ background: 'none', border: 'none', color: '#f87171', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}
-                      >
-                        🗑️ Delete
-                      </button>
-                    )}
-                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: themeConfig.lineColor, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Input (stdin)
+                  </span>
 
                   <textarea
                     value={activeTestCase.input}

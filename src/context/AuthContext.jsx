@@ -100,7 +100,9 @@ export function AuthProvider({ children }) {
           updatedAt: serverTimestamp(),
         }
 
-        setDoc(profileRef, defaultProfile, { merge: true })
+        setDoc(profileRef, defaultProfile, { merge: true }).catch((writeErr) => {
+          console.error('Failed to write default profile:', writeErr)
+        })
         setProfile(defaultProfile)
         setLoading(false)
       },
@@ -194,7 +196,8 @@ export function AuthProvider({ children }) {
   async function checkVerification() {
     if (auth.currentUser) {
       await auth.currentUser.reload()
-      setUser({ ...auth.currentUser })
+      // Use the live reference — spreading a Firebase User object loses its class methods
+      setUser(auth.currentUser)
       return auth.currentUser.emailVerified
     }
     return false
