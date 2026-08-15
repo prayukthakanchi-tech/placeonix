@@ -113,38 +113,11 @@ Return ONLY the raw JSON object. Do not include markdown code block formatting (
       }
     }
   } catch (err) {
-    console.warn("Serverless compiler proxy failed, trying direct browser fallback...", err)
-  }
-
-  try {
-    const key = import.meta.env.VITE_GEMINI_API_KEY
-    if (!key) throw new Error("VITE_GEMINI_API_KEY is not defined")
-
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      }
-    )
-
-    if (!res.ok) throw new Error(`Gemini direct status ${res.status}`)
-    const data = await res.json()
-    let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
-    text = text.replace(/\`\`\`json/gi, '').replace(/\`\`\`/gi, '').trim()
-    const parsed = JSON.parse(text)
-    return {
-      success: parsed.success,
-      output: parsed.output,
-      type: parsed.type || (parsed.success ? undefined : 'Runtime Error'),
-    }
-  } catch (err) {
+    // /api/chat proxy failed. Do not fall back to a direct browser-side Gemini call —
+    // that would expose the API key in the client bundle.
     return {
       success: false,
-      output: `⚠️ Execution failed. Compiler server is currently down, and AI backup compiler could not be initialized: ${err.message}`,
+      output: '⚠️ AI compiler service is temporarily unavailable. Please try again in a moment.',
       type: 'Execution Error'
     }
   }
